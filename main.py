@@ -5,6 +5,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ValidationError
 
+import labview
 from labview import LabViewClient, DeviceCommands, \
     AlicatControl, MagnaControl, LambdaControl,\
     set_alicat_control, set_lambda_control, set_magna_control
@@ -12,10 +13,12 @@ from labview import LabViewClient, DeviceCommands, \
 logger = logging.getLogger(__name__)
 parser = argparse.ArgumentParser()
 parser.add_argument("file", type=Path, help="The path to the command file to monitor")
-parser.add_argument("--host-ip", type=str, default="169.254.144.78", help="The IP address of the LabView client")
-parser.add_argument("--port", type=int, default=59704, help="The port of the labview client")
+parser.add_argument("--host-ip", type=str, default="169.254.144.78", help="The IP address of the LabVIEW client")
+parser.add_argument("--port", type=int, default=59704, help="The port of the LabVIEW client")
 parser.add_argument("--sleep-interval", type=float, default=0.25, help="How often, in seconds, to check for modifications to the command file")
 parser.add_argument("--verbose", "-v", action="store_true", help="Whether to print extra information, including raw byte strings sent to labview")
+parser.add_argument("--data-file", "-d", type=Path, help="The file to which we write data received from LabVIEW. No data will be taken if this is empty")
+parser.add_argument("--data-wait-time", "-t", type=int, help="The time (in seconds) we wait to take data after adjusting the setpoint.")
 
 class ControlMetadata(BaseModel):
     counter: int = 0
@@ -152,7 +155,19 @@ if __name__ == "__main__":
                     status_str += f"    {k}: {v}\n"
                 
                 logger.info(status_str)
-                logger.info("Sending to LabView")
-                send_model_setpoints_to_labview(client, control, args.verbose)
+                logger.info("Sending to LabView...")
+                #send_model_setpoints_to_labview(client, control, args.verbose)
+
+                # Taking data
+                if args.data_file is not None:
+                    print()
+                    for t in range(args.data_wait_time, 0, -1):
+                        time_str = f"{t} s"
+                        print("\r", end="")
+                        logger.info(f"Waiting to take data. Time remaining: " + time_str)
+                        time.sleep(1)
+                    logger.info("Taking data...")
+                    readings = labview.get_magna_readings(client)
+                    print(f"Current = {readings.current}")
 
             time.sleep(args.sleep_interval)
