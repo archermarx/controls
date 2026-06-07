@@ -15,6 +15,7 @@ parser.add_argument("file", type=Path, help="The path to the command file to mon
 parser.add_argument("--host-ip", type=str, default="169.254.144.78", help="The IP address of the LabView client")
 parser.add_argument("--port", type=int, default=59704, help="The port of the labview client")
 parser.add_argument("--sleep-interval", type=float, default=0.25, help="How often, in seconds, to check for modifications to the command file")
+parser.add_argumnet("--verbose", "-v", action="store_true", help="Whether to print extra information, including raw byte strings sent to labview")
 
 class ControlMetadata(BaseModel):
     counter: int = 0
@@ -65,31 +66,37 @@ def build_magna_command(setpoint: ControlPoint):
     )
 
 def build_alicat_command(setpoint: ControlPoint):
-    anode_flow_rate_mg_s = setpoint.anode_flow_rate_kg_s
+    anode_flow_rate_mg_s = setpoint.anode_flow_rate_kg_s * 1e6
     cathode_flow_rate_mg_s = anode_flow_rate_mg_s * setpoint.cathode_flow_fraction
+    propellant = "Kr"
+    sccms = {
+        "Xe": 11.18,
+        "Kr": 17.25,
+        "Ar": 36.75,
+    }
 
     anode_control = AlicatControl(
         label="anode",
-        setpoint=anode_flow_rate_mg_s,
-        units="mg/s",
+        setpoint=anode_flow_rate_mg_s * sccms[propellant],
+        units="sccm",
     )
 
     cathode_control = AlicatControl(
         label="cathode",
-        setpoint=cathode_flow_rate_mg_s,
-        units="mg/s",
+        setpoint=cathode_flow_rate_mg_s * sccms[propellant],
+        units="sccm",
     )
 
     return [anode_control, cathode_control]
 
-def send_model_setpoints_to_labview(client: LabViewClient, setpoint: ControlPoint):
+def send_model_setpoints_to_labview(client: LabViewClient, setpoint: ControlPoint, verbose: bool=False):
     alicat_commands = build_alicat_command(setpoint)
     lambda_commands = build_lambda_commands(setpoint)
     magna_commands = build_magna_command(setpoint)
 
-    set_magna_control(client, magna_commands)
-    set_alicat_control(client, alicat_commands)
-    set_lambda_control(client, lambda_commands)
+    set_magna_control(client, magna_commands, verbose)
+    set_alicat_control(client, alicat_commands, verbose)
+    set_lambda_control(client, lambda_commands, verbose)
 
     return DeviceCommands(magna_commands, alicat_commands, lambda_commands)
 
@@ -146,6 +153,6 @@ if __name__ == "__main__":
                 
                 logger.info(status_str)
                 logger.info("Sending to LabView")
-                send_model_setpoints_to_labview(client, control)
+                send_model_setpoints_to_labview(client, control, args.verbose)
 
             time.sleep(args.sleep_interval)

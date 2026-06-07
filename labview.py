@@ -419,7 +419,7 @@ def unpack_oscope_readings(payload: bytes) -> list[OscopeReadings]:
 
 # PEPL Lab Device Specific Packing Functions
 
-def pack_magna_control(control: MagnaControl) -> bytes:
+def pack_magna_control(control: MagnaControl, verbose=False) -> bytes:
     writer = LabViewWriter()
 
     writer.f64(control.voltage_limit)
@@ -427,11 +427,17 @@ def pack_magna_control(control: MagnaControl) -> bytes:
     writer.f64(control.overvoltage_trip)
     writer.f64(control.overcurrent_trip)
     writer.boolean(control.enable)
-    
-    return writer.bytes()
 
-def pack_alicat_control(controls: list[AlicatControl]) -> bytes:
+    bytes = writer.bytes()
+    if verbose:
+        print("Magna bytes:", bytes)
+    
+    return bytes
+
+def pack_alicat_control(controls: list[AlicatControl], verbose=False) -> bytes:
     writer = LabViewWriter()
+
+    writer.i32(len(controls))
 
     for c in controls:
         writer.string(c.label)
@@ -440,11 +446,17 @@ def pack_alicat_control(controls: list[AlicatControl]) -> bytes:
         writer.u16(c.loop_control_variable)
         writer.boolean(c.valve_hold)
 
-    return writer.bytes()
+    bytes = writer.bytes()
+    if verbose:
+        print("Alicat bytes:", bytes)
+    
+    return bytes
 
-def pack_lambda_control(controls: list[LambdaControl]) -> bytes:
+def pack_lambda_control(controls: list[LambdaControl], verbose=False) -> bytes:
     writer = LabViewWriter()
 
+    writer.i32(len(controls))
+    
     for c in controls:
         writer.string(c.label)
         writer.f64(c.voltage_limit)
@@ -452,7 +464,12 @@ def pack_lambda_control(controls: list[LambdaControl]) -> bytes:
         writer.f64(c.overvoltage_protection)
         writer.boolean(c.enable)
 
-    return writer.bytes()
+    bytes = writer.bytes()
+    if verbose:
+        print("Lambda bytes:", bytes)
+    
+    return bytes
+    
 
 # TCP Client 
 def receive_from_labview(socket: socket.socket, n_bytes: int) -> bytes:
@@ -561,24 +578,24 @@ def get_magna_readings(client: LabViewClient) -> MagnaReadings:
     payload = client.request(CMD_MAGNA_GET_READINGS, empty_payload())
     return unpack_magna_readings(payload)
     
-def set_magna_control(client: LabViewClient, control: MagnaControl) -> None:
-    response = client.request(CMD_MAGNA_SET_CONTROL, pack_magna_control(control))
+def set_magna_control(client: LabViewClient, control: MagnaControl, verbose=False) -> None:
+    response = client.request(CMD_MAGNA_SET_CONTROL, pack_magna_control(control, verbose))
     return check_empty_ack("Magna Set Control", response)
 
 def get_alicat_readings(client: LabViewClient) -> list[AlicatReadings]:
     payload = client.request(CMD_ALICAT_GET_READINGS, empty_payload())
     return unpack_alicat_readings(payload)
 
-def set_alicat_control(client: LabViewClient, control: list[AlicatControl]) -> None:
-    response = client.request(CMD_ALICAT_SET_CONTROL, pack_alicat_control(control))
+def set_alicat_control(client: LabViewClient, control: list[AlicatControl], verbose=False) -> None:
+    response = client.request(CMD_ALICAT_SET_CONTROL, pack_alicat_control(control, verbose))
     return check_empty_ack("Alicat Set Control", response)
 
 def get_lambda_readings(client: LabViewClient) -> list[LambdaReadings]:
     payload = client.request(CMD_LAMBDA_GET_READINGS, empty_payload())
     return unpack_lambda_readings(payload)
 
-def set_lambda_control(client: LabViewClient, control: list[LambdaControl]) -> None:
-    response = client.request(CMD_LAMBDA_SET_CONTROL, pack_lambda_control(control))
+def set_lambda_control(client: LabViewClient, control: list[LambdaControl], verbose=False) -> None:
+    response = client.request(CMD_LAMBDA_SET_CONTROL, pack_lambda_control(control, verbose))
     return check_empty_ack("Lambda Set Controls", response)
 
 def get_oscope_readings(client: LabViewClient) -> list[OscopeReadings]:
