@@ -172,10 +172,10 @@ if __name__ == "__main__":
                     oscope_readings = labview.get_oscope_readings(client)
                     # anode, cathode, discharge voltage, c2g voltage
                     anode_current = oscope_readings[0]
-                    time = anode_current.waveform.time_values()
-                    current = anode_current.waveform.y_values()
+                    t_current = anode_current.waveform.time_values()
+                    I_current = anode_current.waveform.y_values()
                     fig, ax = plt.subplots()
-                    ax.plot(time, current)
+                    ax.plot(t_current, I_current)
                     plt.savefig("oscope.png")
 
                     print(f"DMM Current = {readings.current}")
