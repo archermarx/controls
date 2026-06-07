@@ -123,7 +123,6 @@ if __name__ == "__main__":
 
     control_file = Path(args.file)
 
-
     try:
         contents = read_control_file(control_file, logger)
         counter = contents.metadata.counter

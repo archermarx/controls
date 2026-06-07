@@ -287,7 +287,6 @@ class LabViewWriter:
         self.i32(len(encoded))
         self.value_types.append(encoded)
 
-
 def flatten_empty_string() -> bytes:
     writer = LabViewWriter()
     writer.string("")
@@ -434,8 +433,6 @@ def pack_magna_control(control: MagnaControl) -> bytes:
 def pack_alicat_control(controls: list[AlicatControl]) -> bytes:
     writer = LabViewWriter()
 
-    writer.i32(len(controls))
-
     for c in controls:
         writer.string(c.label)
         writer.f64(c.setpoint)
@@ -448,8 +445,6 @@ def pack_alicat_control(controls: list[AlicatControl]) -> bytes:
 def pack_lambda_control(controls: list[LambdaControl]) -> bytes:
     writer = LabViewWriter()
 
-    writer.i32(len(controls))
-
     for c in controls:
         writer.string(c.label)
         writer.f64(c.voltage_limit)
@@ -459,10 +454,7 @@ def pack_lambda_control(controls: list[LambdaControl]) -> bytes:
 
     return writer.bytes()
 
-
-
 # TCP Client 
-
 def receive_from_labview(socket: socket.socket, n_bytes: int) -> bytes:
     data = b""
 
