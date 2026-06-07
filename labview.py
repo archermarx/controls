@@ -3,8 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, asdict
 from typing import Any
 
-import copy, socket, struct, time
-
+import socket, struct, time
 
 # GLOBAL VARIABLES
 

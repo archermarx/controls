@@ -123,10 +123,6 @@ if __name__ == "__main__":
 
     control_file = Path(args.file)
 
-    client = LabViewClient(
-        host=args.host_ip,
-        port=args.port,
-    )
 
     try:
         contents = read_control_file(control_file, logger)
@@ -139,17 +135,18 @@ if __name__ == "__main__":
 
     logger.info(f"{counter=}, {last_modified=}")
 
-    while True:
-        counter, last_modified, control, changed = check_for_change(control_file, counter, last_modified, contents, logger)
-        if changed:
-            control_dict = control.model_dump()
-            status_str = f"New setpoint received (counter={counter})"
-            status_str = "\n" + status_str + "\n" + "-"*len(status_str) + "\n"
-            for (k, v) in control_dict.items():
-                status_str += f"    {k}: {v}\n"
-            
-            logger.info(status_str)
-            logger.info("Sending to LabView")
-            send_model_setpoints_to_labview(client, control)
+    with LabViewClient(host=args.host_ip, port=args.port) as client:
+        while True:
+            counter, last_modified, control, changed = check_for_change(control_file, counter, last_modified, contents, logger)
+            if changed:
+                control_dict = control.model_dump()
+                status_str = f"New setpoint received (counter={counter})"
+                status_str = "\n" + status_str + "\n" + "-"*len(status_str) + "\n"
+                for (k, v) in control_dict.items():
+                    status_str += f"    {k}: {v}\n"
+                
+                logger.info(status_str)
+                logger.info("Sending to LabView")
+                send_model_setpoints_to_labview(client, control)
 
-        time.sleep(args.sleep_interval)
+            time.sleep(args.sleep_interval)
