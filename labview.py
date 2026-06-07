@@ -122,6 +122,10 @@ class LambdaControl:
     enable: bool = False
 
 @dataclass
+class KeysightDMMReading:
+    pass
+
+@dataclass
 class OscopeAxis:
     increment: float
     origin: float
