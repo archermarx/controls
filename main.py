@@ -149,6 +149,6 @@ if __name__ == "__main__":
             
             logger.info(status_str)
             logger.info("Sending to LabView")
-            send_model_setpoints_to_labview(client, control, None)
+            send_model_setpoints_to_labview(client, control)
 
         time.sleep(args.sleep_interval)
