@@ -402,7 +402,10 @@ def unpack_oscope_waveform(reader: LabViewReader) -> OscopeWaveform:
 
     n_points = reader.array_length("Oscope Wavefrom Data")
     #data = [reader.u16() for _ in range(n_points)]
-    bytes = reader.read_payload(reader.remaining())
+
+    bytes = reader.read_payload(n_points * 16)
+    print(f"{len(bytes)=}")
+    print(f"{n_points=}")
     data = np.frombuffer(bytes, dtype=np.uint16)
 
     return OscopeWaveform(x = x_axis, y = y_axis, data = list(data))
