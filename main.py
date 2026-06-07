@@ -168,7 +168,21 @@ if __name__ == "__main__":
                         logger.info(f"Waiting to take data. Time remaining: " + time_str)
                         time.sleep(1)
                     logger.info("Taking data...")
-                    readings = labview.get_dmm_readings(client)
+
+                    dmm_readings = labview.get_dmm_readings(client)
+                    print(f"DMM Current = {dmm_readings.current} A")
+
+                    magna_readings = labview.get_magna_readings(client)
+                    print(f"Magna Current = {magna_readings.current} A")
+
+                    alicat_readings = labview.get_alicat_readings(client)
+                    for reading in alicat_readings:
+                        print(f"Alicat reading ({reading.label}) = {reading.mass_flow} {reading.mass_flow_units}")
+
+                    lambda_readings = labview.get_lambda_readings(client)
+                    for reading in lambda_readings:
+                        print(f"Lambda reading ({reading.label}) = {reading.current} V")
+
                     oscope_readings = labview.get_oscope_readings(client)
                     # anode, cathode, discharge voltage, c2g voltage
                     anode_current = oscope_readings[0]
@@ -178,6 +192,5 @@ if __name__ == "__main__":
                     ax.plot(t_current, I_current)
                     plt.savefig("oscope.png")
 
-                    print(f"DMM Current = {readings.current}")
 
             time.sleep(args.sleep_interval)
