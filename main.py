@@ -15,7 +15,7 @@ parser.add_argument("file", type=Path, help="The path to the command file to mon
 parser.add_argument("--host-ip", type=str, default="169.254.144.78", help="The IP address of the LabView client")
 parser.add_argument("--port", type=int, default=59704, help="The port of the labview client")
 parser.add_argument("--sleep-interval", type=float, default=0.25, help="How often, in seconds, to check for modifications to the command file")
-parser.add_argumnet("--verbose", "-v", action="store_true", help="Whether to print extra information, including raw byte strings sent to labview")
+parser.add_argument("--verbose", "-v", action="store_true", help="Whether to print extra information, including raw byte strings sent to labview")
 
 class ControlMetadata(BaseModel):
     counter: int = 0
