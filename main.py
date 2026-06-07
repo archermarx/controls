@@ -19,7 +19,7 @@ parser.add_argument("--port", type=int, default=59704, help="The port of the Lab
 parser.add_argument("--sleep-interval", type=float, default=0.25, help="How often, in seconds, to check for modifications to the command file")
 parser.add_argument("--verbose", "-v", action="store_true", help="Whether to print extra information, including raw byte strings sent to labview")
 parser.add_argument("--data-file", "-d", type=Path, help="The file to which we write data received from LabVIEW. No data will be taken if this is empty")
-parser.add_argument("--data-wait-time", "-t", type=int, default=5, help="The time (in seconds) we wait to take data after adjusting the setpoint.")
+parser.add_argument("--data-wait-time", "-t", type=int, default=2, help="The time (in seconds) we wait to take data after adjusting the setpoint.")
 
 class ControlMetadata(BaseModel):
     counter: int = 0
