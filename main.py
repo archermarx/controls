@@ -167,7 +167,7 @@ if __name__ == "__main__":
                         logger.info(f"Waiting to take data. Time remaining: " + time_str)
                         time.sleep(1)
                     logger.info("Taking data...")
-                    readings = labview.get_magna_readings(client)
-                    print(f"Current = {readings.current}")
+                    readings = labview.get_dmm_readings(client)
+                    print(f"DMM Current = {readings.current}")
 
             time.sleep(args.sleep_interval)

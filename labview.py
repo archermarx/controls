@@ -122,8 +122,8 @@ class LambdaControl:
     enable: bool = False
 
 @dataclass
-class KeysightDMMReading:
-    pass
+class KeysightDMMReadings:
+    current: float
 
 @dataclass
 class OscopeAxis:
@@ -298,6 +298,15 @@ def flatten_empty_string() -> bytes:
 
 def empty_payload() -> bytes:
     return flatten_empty_string() if SEND_EMPTY_ARG else b""
+
+def unpack_dmm_readings(payload: bytes) -> KeysightDMMReadings:
+    reader = LabViewReader(payload)
+    output = KeysightDMMReadings(
+        current = reader.f64()
+    )
+
+    reader.assert_consume_all("Keysight DMM readings")
+    return output
 
 # PEPL Lab Device Specific Unpacking Functions
 def unpack_magna_readings(payload: bytes) -> MagnaReadings:
@@ -605,6 +614,10 @@ def set_lambda_control(client: LabViewClient, control: list[LambdaControl], verb
 def get_oscope_readings(client: LabViewClient) -> list[OscopeReadings]:
     payload = client.request(CMD_OSCOPE_GET_READINGS, empty_payload())
     return unpack_oscope_readings(payload)
+
+def get_dmm_readings(client: LabViewClient) -> KeysightDMMReadings:
+    payload = client.request(CMD_DMM_GET_READINGS, empty_payload())
+    return unpack_dmm_readings(payload)
 
 # Raw LabVIEW Collection
 def get_all_readings(client: LabViewClient, *, include_oscope: bool = True) -> dict[str, Any]:
