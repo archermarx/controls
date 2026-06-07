@@ -218,7 +218,7 @@ class LabViewReader:
     
     # Unsigned 32 bit integer (big_endian)
     def u32(self) -> int:
-        return struct.upnack(">I", self.read_payload(4))[0]
+        return struct.unpack(">I", self.read_payload(4))[0]
     
     # 64-bit float (big-endian)
     def f64(self) -> float:
