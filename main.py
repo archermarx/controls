@@ -102,7 +102,7 @@ def check_for_change(file: Path, counter, last_modified, contents, logger):
 
     try:
         contents = read_control_file(file, logger)
-    except PermissionError, FileNotFoundError, ValidationError:
+    except (PermissionError, FileNotFoundError, ValidationError):
         return counter, last_modified, {}, False
 
     new_counter = contents.metadata.counter
@@ -131,7 +131,7 @@ if __name__ == "__main__":
         contents = read_control_file(control_file, logger)
         counter = contents.metadata.counter
         last_modified = control_file.stat().st_mtime
-    except FileNotFoundError, ValidationError:
+    except (FileNotFoundError, ValidationError):
         counter = 0
         last_modified = 0
         contents = {}
