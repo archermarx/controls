@@ -38,7 +38,7 @@ def read_control_file(file, logger):
         raise
 
 def build_lambda_commands(setpoint: ControlPoint):
-    VOLTAGE_LIMIT=100.0
+    VOLTAGE_LIMIT=float('inf')
     inner = LambdaControl(
         label="inner",
         current_limit=setpoint.magnet_current_inner_A,
@@ -60,7 +60,8 @@ def build_magna_command(setpoint: ControlPoint):
         voltage_limit=setpoint.discharge_voltage_V,
         current_limit=40.0, # TODO: expose these as params
         overcurrent_trip=30.0,
-        overvoltage_trip=300.0,
+        overvoltage_trip=1000.0,
+        enable=True,
     )
 
 def build_alicat_command(setpoint: ControlPoint):
