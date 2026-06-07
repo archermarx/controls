@@ -2,6 +2,7 @@ import argparse
 import logging
 import time
 from pathlib import Path
+import matplotlib.pyplot as plt
 
 from pydantic import BaseModel, ValidationError
 
@@ -168,6 +169,15 @@ if __name__ == "__main__":
                         time.sleep(1)
                     logger.info("Taking data...")
                     readings = labview.get_dmm_readings(client)
+                    oscope_readings = labview.get_oscope_readings(client)
+                    # anode, cathode, discharge voltage, c2g voltage
+                    anode_current = oscope_readings[0]
+                    time = anode_current.waveform.time_values()
+                    current = anode_current.waveform.y_values()
+                    fig, ax = plt.subplots()
+                    ax.plot(time, current)
+                    plt.savefig("oscope.png")
+
                     print(f"DMM Current = {readings.current}")
 
             time.sleep(args.sleep_interval)

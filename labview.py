@@ -140,19 +140,15 @@ class OscopeWaveform:
     # Return physical x-axis values for each waveform point.
     # For Keysight-style waveform scaling: 
     #           time[i] = (i - x_reference) * x_increment + x_origin
-
     def time_values(self) -> list[float]:
-        
         return [
             (i - self.x.reference) * self.x.increment + self.x.origin
             for i in range(len(self.data))
         ]
 
     # For Keysight-style waveform scaling:
-    #           ignal[i] = (raw[i] - y_reference) * y_increment + y_origin
-
+    #           signal[i] = (raw[i] - y_reference) * y_increment + y_origin
     def y_values(self) -> list[float]:
-
         return [
             (float(raw_point) - self.y.reference) * self.y.increment + self.y.origin
             for raw_point in self.data
@@ -176,7 +172,7 @@ class OscopeReadings:
     peak_to_peak: float
     rms: float
     average: float
-    wavform: OscopeWaveform
+    waveform: OscopeWaveform
 
 @dataclass
 class DeviceCommands:
@@ -420,7 +416,7 @@ def unpack_oscope_readings(payload: bytes) -> list[OscopeReadings]:
                 peak_to_peak = reader.f64(),
                 rms = reader.f64(),
                 average = reader.f64(),
-                wavform = unpack_oscope_waveform(reader),
+                waveform = unpack_oscope_waveform(reader),
             )
         )
 
