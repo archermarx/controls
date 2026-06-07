@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import numpy as np
+
 from dataclasses import dataclass, asdict
 from typing import Any
 
@@ -141,10 +143,12 @@ class OscopeWaveform:
     # For Keysight-style waveform scaling: 
     #           time[i] = (i - x_reference) * x_increment + x_origin
     def time_values(self) -> list[float]:
-        return [
+        time = np.array([
             (i - self.x.reference) * self.x.increment + self.x.origin
             for i in range(len(self.data))
-        ]
+        ])
+        time += time[-1] / 2
+        return time
 
     # For Keysight-style waveform scaling:
     #           signal[i] = (raw[i] - y_reference) * y_increment + y_origin
