@@ -147,7 +147,7 @@ class OscopeWaveform:
             (i - self.x.reference) * self.x.increment + self.x.origin
             for i in range(len(self.data))
         ])
-        time += time[-1] / 2
+        time -= time[0]
         return time
 
     # For Keysight-style waveform scaling:
