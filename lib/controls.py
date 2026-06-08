@@ -174,11 +174,11 @@ class ThrusterController:
                 "Discharge Voltage": dict(offset=self.setpoint.discharge_voltage_V, range=self.setpoint.discharge_voltage_V/3),
                 "C2G Voltage": dict(offset=-15, range=30),
             }
-            configs = [
+            init_configs = [
                 labview.OscopeConfig(k, range=v["range"], offset=v["offset"], collect_waveforms=False)
                 for (k, v) in variable_settings.items()
             ]
-            labview.set_oscope_config(client, configs)
+            labview.set_oscope_config(client, init_configs)
             prelim_readings = labview.get_oscope_readings(client)
 
             # Configure oscope to collect waveforms
@@ -189,12 +189,19 @@ class ThrusterController:
                     label=reading.label,
                     range=1.5*reading.peak_to_peak,
                     offset=reading.average,
-                    collect_waveforms=False,
+                    collect_waveforms=True,
                 ))
 
             labview.set_oscope_config(client, waveform_configs)
             oscope_readings = labview.get_oscope_readings(client)
             out["oscope"] = {r.label: r for r in oscope_readings}
+
+            for r in oscope_readings:
+                if len(r.waveform.data) == 0:
+                    print(f"Warning: waveform not collected for channel {r.label}")
+
+            # Reset ranges and turn off waveform collection
+            labview.set_oscope_config(client, init_configs)
 
         return out
         

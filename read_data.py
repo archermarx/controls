@@ -14,7 +14,7 @@ for file in os.listdir(dir):
     with open(os.path.join(dir, file), "rb") as fd:
         contents = pickle.load(fd)
 
-    oscope: labview.OscopeReadings = contents["data"]["oscope"]["C2G Voltage"]
+    oscope: labview.OscopeReadings = contents["data"]["oscope"]["Anode Current"]
     print(contents["data"]["oscope"].keys())
     rms = oscope.rms
     average = oscope.average
@@ -27,6 +27,10 @@ for file in os.listdir(dir):
     print(f"Peak to peak (oscope): {peak_to_peak} A")
 
     t, I = waveform.time_values(), waveform.y_values()
+    if average < 12:
+        print(len(I))
+        print(np.mean(I))
+
     t = t * 1000
     ax.set_xlim(0, 0.5)
     ax.plot(t, I)
