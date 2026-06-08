@@ -58,11 +58,21 @@ def time_str(s):
 def status_str(t):
     return f"Waiting to take data. Time remaining: " + time_str(t) + "."
 
+def calibrate(val, cal):
+    return val * cal[0] + cal[1]
+
 class ThrusterController:
     def __init__(self, propellant: str = "Kr", verbose: bool = False):
         self.setpoint = None
         self.verbose = verbose
         self.propellant = propellant
+
+        # Calibration factors: (slope, intercept)
+        self.voltage_cal      = (1.01888,  0.544818)
+        self.inner_magnet_cal = (1.00808, -0.002797)
+        self.outer_magnet_cal = (1.00483, -0.013443)
+        self.anode_flow_cal   = (1.002283, 0.554064)
+        self.cathode_flow_cal = (1.0, 0.0)
 
     def control_to(self, setpoint: ControlPoint, client: LabViewClient):
         if self.setpoint is None:
@@ -80,7 +90,7 @@ class ThrusterController:
 
         # Set the power supply
         magna_control = MagnaControl(
-            voltage_limit=setpoint.discharge_voltage_V,
+            voltage_limit=calibrate(setpoint.discharge_voltage_V, self.voltage_cal),
             current_limit=current_limit,
             overcurrent_trip=overcurrent,
             overvoltage_trip=overvoltage,
@@ -88,8 +98,16 @@ class ThrusterController:
         )
 
         # Set the flow controllers
-        anode_flow_control = AlicatControl(label="anode", setpoint=anode_flow_rate_sccm, units="sccm")
-        cathode_flow_control = AlicatControl(label="cathode", setpoint=cathode_flow_rate_sccm, units="sccm")
+        anode_flow_control = AlicatControl(
+            label="anode",
+            setpoint=calibrate(anode_flow_rate_sccm, self.anode_flow_cal),
+            units="sccm"
+        )
+        cathode_flow_control = AlicatControl(
+            label="cathode",
+            setpoint=calibrate(cathode_flow_rate_sccm, self.cathode_flow_cal),
+            units="sccm"
+        )
         alicat_control = [anode_flow_control, cathode_flow_control]
 
         # Set the magnet power supplies
@@ -97,14 +115,15 @@ class ThrusterController:
         lambda_control = [
             LambdaControl(
                 label=label,
-                current_limit=current,
+                current_limit=calibrate(current, cal),
                 voltage_limit=VOLTAGE_LIMIT,
                 overvoltage_protection=VOLTAGE_LIMIT,
                 enable=True
             )
-            for label, current in zip(
+            for label, current, cal in zip(
                 ["inner", "outer"],
-                [setpoint.magnet_current_inner_A, setpoint.magnet_current_outer_A]
+                [setpoint.magnet_current_inner_A, setpoint.magnet_current_outer_A],
+                [self.inner_magnet_cal, self.outer_magnet_cal],
             )
         ]
 
@@ -137,13 +156,19 @@ class ThrusterController:
             out["magna"] = labview.get_magna_readings(client)
         if "alicat" in sources:
             alicat_readings = labview.get_alicat_readings(client)
-            out["alicat"] = {r.label: r for r in alicat_readings},
+            out["alicat"] = {r.label: r for r in alicat_readings}
         if "lambda" in sources:
             lambda_readings = labview.get_lambda_readings(client)
-            out["lambda"] = {r.label: r for r in lambda_readings},
+            out["lambda"] = {r.label: r for r in lambda_readings}
         if "oscope" in sources:
+            # Configure oscope to collect waveforms
+            # Note: we here assume 4 channels and assign empty labels
+            # In future it may be good to check this and pre-assign things
+            configs = [labview.OscopeConfig("", collect_waveforms=True) for _ in range(4)]
+            labview.set_oscope_config(configs)
+
             oscope_readings = labview.get_oscope_readings(client)
-            out["oscope"] = {r.label: r for r in oscope_readings},
+            out["oscope"] = {r.label: r for r in oscope_readings}
 
         return out
         

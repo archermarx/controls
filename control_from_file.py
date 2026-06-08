@@ -7,13 +7,14 @@ from pathlib import Path
 from pydantic import ValidationError
 
 import lib.controls as controls
+import lib.labview as labview
 from lib.labview import LabViewClient
 
 logger = logging.getLogger(__name__)
 parser = argparse.ArgumentParser()
 parser.add_argument("file", type=Path, help="The path to the command file to monitor")
-parser.add_argument("--host-ip", type=str, default="169.254.144.78", help="The IP address of the LabVIEW client")
-parser.add_argument("--port", type=int, default=59704, help="The port of the LabVIEW client")
+parser.add_argument("--host-ip", type=str, default=labview.LABVIEW_IP, help="The IP address of the LabVIEW client")
+parser.add_argument("--port", type=int, default=labview.LABVIEW_PORT, help="The port of the LabVIEW client")
 parser.add_argument("--sleep-interval", type=float, default=0.25, help="How often, in seconds, to check for modifications to the command file")
 parser.add_argument("--verbose", "-v", action="store_true", help="Whether to print extra information, including raw byte strings sent to labview")
 parser.add_argument("--data-file", "-d", type=Path, help="The file to which we write data received from LabVIEW. No data will be taken if this is empty")

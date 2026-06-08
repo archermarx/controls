@@ -18,8 +18,8 @@ parser.add_argument("--prefix", "-p", type=str, default="data", help="Prefix to 
 parser.add_argument("--gas", "-g", type=str, choices=["Xe", "Kr", "Ar"], default="Kr", help="Propellant gas being used. One of 'Xe', 'Kr', or 'Ar'. Defaults to 'Kr'.")
 parser.add_argument("--verbose", "-v", action="store_true", help="Whether to print the raw bytestrings sent to LabVIEW.")
 parser.add_argument("--dwell-time", "-t", type=int, default=5, help="How long (in seconds) to dwell at each operating point before collecting data.")
-parser.add_argument("--host-ip", type=str, default="169.254.144.78", help="The IP address of the LabVIEW client")
-parser.add_argument("--port", type=int, default=59704, help="The port of the LabVIEW client")
+parser.add_argument("--host-ip", type=str, default=labview.LABVIEW_IP, help="The IP address of the LabVIEW client")
+parser.add_argument("--port", type=int, default=labview.LABVIEW_PORT, help="The port of the LabVIEW client")
 parser.add_argument("--interactive", "-i", action="store_true", help="Whether to ask the user before proceeding to the next control point")
 
 def num_digits(n):

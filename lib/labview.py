@@ -33,6 +33,7 @@ CMD_ALICAT_SET_CONTROL = 0x1C                       # Command 28
 CMD_LAMBDA_GET_READINGS = 0x23                      # Command 35
 CMD_LAMBDA_SET_CONTROL = 0x24                       # Command 36
 
+CMD_OSCOPE_SET_CONFIG = 0x2A                        # Command 42
 CMD_OSCOPE_GET_READINGS = 0x2B                      # Command 43
                                                     
 CMD_DMM_GET_READINGS = 0x31                         # Command 49
@@ -147,7 +148,6 @@ class OscopeWaveform:
             (i - self.x.reference) * self.x.increment + self.x.origin
             for i in range(len(self.data))
         ])
-        time -= time[0]
         return time
 
     # For Keysight-style waveform scaling:
@@ -177,6 +177,11 @@ class OscopeReadings:
     rms: float
     average: float
     waveform: OscopeWaveform
+
+@dataclass
+class OscopeConfig:
+    label: str
+    collect_waveforms: True
 
 @dataclass
 class DeviceCommands:
@@ -430,10 +435,7 @@ def unpack_oscope_readings(payload: bytes) -> list[OscopeReadings]:
 
     return output
 
-
-
 # PEPL Lab Device Specific Packing Functions
-
 def pack_magna_control(control: MagnaControl, verbose=False) -> bytes:
     writer = LabViewWriter()
 
@@ -446,6 +448,20 @@ def pack_magna_control(control: MagnaControl, verbose=False) -> bytes:
     bytes = writer.bytes()
     if verbose:
         print("Magna bytes:", bytes)
+    
+    return bytes
+
+def pack_oscope_config(controls: list[OscopeConfig], verbose=False) -> bytes:
+    writer = LabViewWriter()
+    writer.i32(len(controls))
+
+    for c in controls:
+        writer.string(c.label)
+        writer.boolean(c.collect_waveforms)
+
+    bytes = writer.bytes()
+    if verbose:
+        print("Oscope config bytes:", bytes)
     
     return bytes
 
@@ -620,6 +636,10 @@ def get_oscope_readings(client: LabViewClient) -> list[OscopeReadings]:
 def get_dmm_readings(client: LabViewClient) -> KeysightDMMReadings:
     payload = client.request(CMD_DMM_GET_READINGS, empty_payload())
     return unpack_dmm_readings(payload)
+
+def set_oscope_config(client: LabViewClient, config: list[OscopeConfig]) -> None:
+    response = client.request(CMD_OSCOPE_SET_CONFIG, pack_oscope_config(config))
+    return check_empty_ack("Oscope set config", response)
 
 # Raw LabVIEW Collection
 def get_all_readings(client: LabViewClient, *, include_oscope: bool = True) -> dict[str, Any]:
