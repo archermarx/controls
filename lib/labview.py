@@ -13,7 +13,7 @@ import socket, struct, time
 # Communication variables
 
 # TCP Client Configuration
-LABVIEW_IP = '10.0.0.1'
+LABVIEW_IP = '169.254.144.78'
 LABVIEW_PORT = 59704                                 # Set this to actual TCP port for receiving data from LabView
 SOCKET_TIMEOUT = 7.0
 
@@ -144,10 +144,14 @@ class OscopeWaveform:
     # For Keysight-style waveform scaling: 
     #           time[i] = (i - x_reference) * x_increment + x_origin
     def time_values(self) -> list[float]:
-        time = np.array([
-            (i - self.x.reference) * self.x.increment + self.x.origin
-            for i in range(len(self.data))
-        ])
+        if len(self.data) > 0:
+            time = np.array([
+                (i - self.x.reference) * self.x.increment + self.x.origin
+                for i in range(len(self.data))
+            ])
+            time -= time[0]
+        else:
+            time = np.array([])
         return time
 
     # For Keysight-style waveform scaling:
@@ -406,11 +410,11 @@ def unpack_oscope_waveform(reader: LabViewReader) -> OscopeWaveform:
     )
 
     n_points = reader.array_length("Oscope Wavefrom Data")
-    bytes = reader.read_payload(n_points * 2)
-    dt = np.dtype(np.uint16)
+    bytes = reader.read_payload(n_points)
+    dt = np.dtype(np.uint8)
     dt = dt.newbyteorder('>')
     data = np.frombuffer(bytes, dtype=dt)
-    return OscopeWaveform(x = x_axis, y = y_axis, data = list(data))
+    return OscopeWaveform(x = x_axis, y = y_axis, data = data)
 
 def unpack_oscope_readings(payload: bytes) -> list[OscopeReadings]:
     reader = LabViewReader(payload)

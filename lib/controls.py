@@ -165,7 +165,7 @@ class ThrusterController:
             # Note: we here assume 4 channels and assign empty labels
             # In future it may be good to check this and pre-assign things
             configs = [labview.OscopeConfig("", collect_waveforms=True) for _ in range(4)]
-            labview.set_oscope_config(configs)
+            labview.set_oscope_config(client, configs)
 
             oscope_readings = labview.get_oscope_readings(client)
             out["oscope"] = {r.label: r for r in oscope_readings}
