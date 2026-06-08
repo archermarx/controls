@@ -44,15 +44,13 @@ def pid_mass_flow_step(
 
     if state.previous_error is None:
         derivative_error = 0.0
-
     else:
         derivative_error = (error - state.previous_error) / dt
-
 
     candidate_integral = state.integral_error + error * dt
 
     if integral_limit is not None:
-        candidat_integral = max(
+        candidate_integral = max(
             -integral_limit, min(integral_limit, candidate_integral)
         )
 
@@ -68,9 +66,7 @@ def pid_mass_flow_step(
         min_flow, min(max_flow, unclamped_flow)
     )
 
-
     # Integral Anti-windup
-
     saturated_high = unclamped_flow > max_flow
     saturated_low = unclamped_flow < min_flow
 

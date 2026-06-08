@@ -5,7 +5,7 @@ import pickle
 import time
 
 import lib.labview as labview
-from pid_mf_dc import PIDState, pid_mass_flow_step
+from lib.pid import PIDState, pid_mass_flow_step
 
 parser = argparse.ArgumentParser()
 
@@ -28,8 +28,6 @@ parser.add_argument("--verbose", "-v", action="store_true", help="Print PID loop
 parser.add_argument("--output", "-o", type=Path, default=Path("."), help="Folder where PID data is saved")
 parser.add_argument("--prefix", "-p", type=str, default="pid_mass_flow", help="Output filename prefix")
 
-
-
 def find_anode_alicat(alicat_readings):
     for item in alicat_readings:
         label = item.label.lower().replace("_", "").replace(" ", "")
@@ -38,8 +36,6 @@ def find_anode_alicat(alicat_readings):
 
     labels = [item.label for item in alicat_readings]
     raise ValueError(f"Could not find anode Alicat. Available Alicat labels: {labels}")
-
-
 
 def send_anode_flow(client, anode_flow_command):
     alicat_readings = labview.get_alicat_readings(client)
@@ -66,8 +62,6 @@ def send_anode_flow(client, anode_flow_command):
     labview.set_alicat_control(client, controls)
     return anode
 
-
-
 def main(args):
     output_dir = Path(args.output)
     os.makedirs(output_dir, exist_ok=True)
@@ -87,8 +81,6 @@ def main(args):
 
     start_time = time.monotonic()
 
-
-
     with labview.LabViewClient(host=args.host_ip, port=args.port) as client:
         while True:
             loop_start = time.monotonic()
@@ -98,8 +90,8 @@ def main(args):
                 break
 
             # Read discharge current from Magna
-            magna = labview.get_magna_readings(client)
-            measured_current = magna.current
+            dmm = labview.get_dmm_readings(client)
+            measured_current = dmm.current
 
             # Run one PID step
             anode_flow_command = pid_mass_flow_step(
@@ -150,14 +142,10 @@ def main(args):
             if sleep_time > 0:
                 time.sleep(sleep_time)
 
-
-
     with open(out_file, "wb") as fd:
         pickle.dump(data_log, fd)
 
     print(f"PID data written to {out_file}")
-
-
 
 if __name__ == "__main__":
     args = parser.parse_args()

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import time
 from pydantic import BaseModel, ValidationError
 
@@ -87,6 +89,7 @@ class ThrusterController:
         overcurrent = 3 * expected_current
         current_limit = 1.25 * overcurrent
         overvoltage = 1000
+        self.current_limit = current_limit
 
         # Set the power supply
         magna_control = MagnaControl(
@@ -161,12 +164,40 @@ class ThrusterController:
             lambda_readings = labview.get_lambda_readings(client)
             out["lambda"] = {r.label: r for r in lambda_readings}
         if "oscope" in sources:
-            # Configure oscope to collect waveforms
-            # Note: we here assume 4 channels and assign empty labels
-            # In future it may be good to check this and pre-assign things
-            configs = [labview.OscopeConfig("", collect_waveforms=True) for _ in range(4)]
+            # Configure oscope to not collect waveforms so we can grab the averages and peak to peak amplitudes
+            # The oscope has 8-bit depth so we want to ensure we get maximum resolution when we get waveforms
+            # This requires that we rescale things on the fly
+            # Note: the keys are hard-coded here. We shouldn't do this.
+            variable_settings = {
+                "Anode Current": dict(offset=self.current_limit/2, range=self.current_limit),
+                "Cathode Current": dict(offset=self.current_limit/2, range=self.current_limit),
+                "Discharge Voltage": dict(offset=self.discharge_voltage, range=self.discharge_voltage/3),
+                "C2G Voltage": dict(offset=-15, range=30),
+            }
+            configs = [
+                labview.OscopeConfig(k, range=v["range"], offset=v["offset"], collect_waveforms=False)
+                for (k, v) in variable_settings.items()
+            ]
             labview.set_oscope_config(client, configs)
+            prelim_readings = labview.get_oscope_readings(client)
 
+            while True:
+                yn = input("Preliminary range set. Continue? (y/n): ")
+                if yn.casefold() == "y":
+                    break
+            
+            # Configure oscope to collect waveforms
+            # For each channel, we need to get the mean and p2p and use this to set the range
+            waveform_configs = []
+            for reading in prelim_readings:
+                waveform_configs.append(labview.OscopeConfig(
+                    label=reading.label,
+                    range=1.5*reading.peak_to_peak,
+                    offset=reading.average,
+                    collect_waveforms=False,
+                ))
+
+            labview.set_oscope_config(client, waveform_configs)
             oscope_readings = labview.get_oscope_readings(client)
             out["oscope"] = {r.label: r for r in oscope_readings}
 

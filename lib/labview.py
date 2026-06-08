@@ -185,6 +185,8 @@ class OscopeReadings:
 @dataclass
 class OscopeConfig:
     label: str
+    range: float
+    offset: float
     collect_waveforms: True
 
 @dataclass
@@ -461,6 +463,8 @@ def pack_oscope_config(controls: list[OscopeConfig], verbose=False) -> bytes:
 
     for c in controls:
         writer.string(c.label)
+        writer.f64(c.range)
+        writer.f64(c.offset)
         writer.boolean(c.collect_waveforms)
 
     bytes = writer.bytes()

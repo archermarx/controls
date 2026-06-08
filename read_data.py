@@ -14,17 +14,21 @@ for file in os.listdir(dir):
     with open(os.path.join(dir, file), "rb") as fd:
         contents = pickle.load(fd)
 
-    oscope: labview.OscopeReadings = contents["data"]["oscope"]["Anode Current"]
+    oscope: labview.OscopeReadings = contents["data"]["oscope"]["C2G Voltage"]
+    print(contents["data"]["oscope"].keys())
     rms = oscope.rms
     average = oscope.average
     peak_to_peak = oscope.peak_to_peak
     waveform = oscope.waveform
 
-    print(f"{peak_to_peak=}")
-    print(f"{average=}")
+    dmm = contents["data"]["dmm"].current
+    print(f"Average (DMM): {dmm} A")
+    print(f"Average (oscope): {average} A")
+    print(f"Peak to peak (oscope): {peak_to_peak} A")
+
     t, I = waveform.time_values(), waveform.y_values()
     t = t * 1000
-    ax.set_xlim(0, 2.0)
+    ax.set_xlim(0, 0.5)
     ax.plot(t, I)
 
 fig.savefig("oscillations.png")
