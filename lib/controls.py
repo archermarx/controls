@@ -82,7 +82,7 @@ class ThrusterController:
             voltage_limit=setpoint.discharge_voltage_V,
             current_limit=current_limit,
             overcurrent_trip=overcurrent,
-            overvoltage_trip=2.5 * setpoint.discharge_voltage_v,
+            overvoltage_trip=2.5 * setpoint.discharge_voltage_V,
             enable=True,
         )
 

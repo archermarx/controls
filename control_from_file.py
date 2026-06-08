@@ -84,4 +84,6 @@ if __name__ == "__main__":
                     with open(args.data_file, "wb") as fd:
                         pickle.dump(data, fd)
 
+                    logger.info(f"Data saved to {args.data_file}.")
+
             time.sleep(args.sleep_interval)
