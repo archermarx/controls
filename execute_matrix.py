@@ -76,7 +76,7 @@ def main(args):
 
             print(f"Setpoint {i+1}: data written to {out_file}")
 
-            if args.interactive:
+            if args.interactive and i <= num_elems - 1:
                 while True:
                     answer = input("Proceed to next point (y/n)? ")
                     if answer.casefold() == "y":

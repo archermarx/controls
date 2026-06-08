@@ -76,13 +76,14 @@ class ThrusterController:
         expected_current = anode_flow_rate_mg_s * CURRENT_PER_FLOW[self.propellant]
         overcurrent = 3 * expected_current
         current_limit = 1.25 * overcurrent
+        overvoltage = 1000
 
         # Set the power supply
         magna_control = MagnaControl(
             voltage_limit=setpoint.discharge_voltage_V,
             current_limit=current_limit,
             overcurrent_trip=overcurrent,
-            overvoltage_trip=2.5 * setpoint.discharge_voltage_V,
+            overvoltage_trip=overvoltage,
             enable=True,
         )
 
@@ -95,8 +96,10 @@ class ThrusterController:
         VOLTAGE_LIMIT=float('inf')
         lambda_control = [
             LambdaControl(
-                label=label, current_limit=current,
-                voltage_limit=VOLTAGE_LIMIT, overvoltage_protection=VOLTAGE_LIMIT,
+                label=label,
+                current_limit=current,
+                voltage_limit=VOLTAGE_LIMIT,
+                overvoltage_protection=VOLTAGE_LIMIT,
                 enable=True
             )
             for label, current in zip(
