@@ -20,6 +20,7 @@ parser.add_argument("--verbose", "-v", action="store_true", help="Whether to pri
 parser.add_argument("--dwell-time", "-t", type=int, default=5, help="How long (in seconds) to dwell at each operating point before collecting data.")
 parser.add_argument("--host-ip", type=str, default="169.254.144.78", help="The IP address of the LabVIEW client")
 parser.add_argument("--port", type=int, default=59704, help="The port of the LabVIEW client")
+parser.add_argument("--interactive", "-i", action="store_true", help="Whether to ask the user before proceeding to the next control point")
 
 def num_digits(n):
     if n > 0:
@@ -63,13 +64,23 @@ def main(args):
             print(f"Setpoint {i+1}: {setpoint}")
             controller.control_to(setpoint, client)
             data = controller.take_data(client, delay=args.dwell_time, sources=data_types)
-            data = {}
             out_file = output_dir / filename_format.format(i+1)
 
+            output = {
+                "controls": setpoint.model_dump(),
+                "data": data,
+            }
+
             with open(out_file, "wb") as fd:
-                pickle.dump(data, fd)
+                pickle.dump(output, fd)
 
             print(f"Setpoint {i+1}: data written to {out_file}")
+
+            if args.interactive:
+                while True:
+                    answer = input("Proceed to next point (y/n)? ")
+                    if answer.casefold() == "y":
+                        break
 
 if __name__ == "__main__":
     args = parser.parse_args()

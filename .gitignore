@@ -11,4 +11,4 @@ wheels/
 uv.lock
 *.log
 ~$*
-matrix.csv
+*.csv
