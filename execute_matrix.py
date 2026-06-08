@@ -62,7 +62,7 @@ def main(args):
             
             print(f"Setpoint {i+1}: {setpoint}")
             controller.control_to(setpoint, client)
-            data = controller.take_data(client, delay=args.dwell, sources=data_types)
+            data = controller.take_data(client, delay=args.dwell_time, sources=data_types)
             data = {}
             out_file = output_dir / filename_format.format(i+1)
 
