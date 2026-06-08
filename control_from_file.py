@@ -17,7 +17,7 @@ parser.add_argument("--port", type=int, default=59704, help="The port of the Lab
 parser.add_argument("--sleep-interval", type=float, default=0.25, help="How often, in seconds, to check for modifications to the command file")
 parser.add_argument("--verbose", "-v", action="store_true", help="Whether to print extra information, including raw byte strings sent to labview")
 parser.add_argument("--data-file", "-d", type=Path, help="The file to which we write data received from LabVIEW. No data will be taken if this is empty")
-parser.add_argument("--data-wait-time", "-t", type=int, default=2, help="The time (in seconds) we wait to take data after adjusting the setpoint.")
+parser.add_argument("--dwell-time", "-t", type=int, default=5, help="How long (in seconds) to dwell at each operating point before collecting data.")
 
 def check_for_change(file: Path, counter, last_modified, contents, logger):
     if not file.exists():
@@ -78,10 +78,10 @@ if __name__ == "__main__":
 
                 # Taking data
                 if args.data_file is not None:
-                    data = controller.take_data(client=client, delay=args.data_wait_time)
+                    data = controller.take_data(client=client, delay=args.dwell_time)
 
                     # Save data to file
-                    with open(args.data_file, "w") as fd:
+                    with open(args.data_file, "wb") as fd:
                         pickle.dump(data, fd)
 
             time.sleep(args.sleep_interval)

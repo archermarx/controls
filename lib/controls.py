@@ -3,8 +3,8 @@ from tqdm import tqdm
 
 from pydantic import BaseModel, ValidationError
 
-import labview as labview
-from labview import LabViewClient, MagnaControl, AlicatControl, LambdaControl, \
+import lib.labview as labview
+from lib.labview import LabViewClient, MagnaControl, AlicatControl, LambdaControl, \
                     DeviceCommands
 
 # Conversion factors from mg/s to SCCM for noble gas propellants
@@ -98,7 +98,7 @@ class ThrusterController:
         lambda_control = [
             LambdaControl(
                 label=label, current_limit=current,
-                voltage_limit=VOLTAGE_LIMIT, current_limit=VOLTAGE_LIMIT,
+                voltage_limit=VOLTAGE_LIMIT, overvoltage_protection=VOLTAGE_LIMIT,
                 enable=True
             )
             for label, current in zip(
