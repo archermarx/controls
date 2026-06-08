@@ -1,0 +1,109 @@
+from pydantic import BaseModel, ValidationError
+
+import labview
+from labview import LabViewClient, MagnaControl, AlicatControl, LambdaControl, \
+                    DeviceCommands
+
+# Conversion factors from mg/s to SCCM for noble gas propellants
+MGS_TO_SCCM = {
+    "Xe": 11.18,
+    "Kr": 17.25,
+    "Ar": 36.75,
+}
+
+# Approximate mass flow rates in mgs for 15 A for noble gas propellants.
+# Used to set approximate current limits
+# Xe and Kr data from Su et al. 2024. Argon number approximate.
+CURRENT_PER_FLOW = {
+    "Xe": 15 / 14.8,
+    "Kr": 15 / 11.8,
+    "Ar": 15 / 7.0,
+}
+
+class ControlMetadata(BaseModel):
+    counter: int = 0
+
+class ControlPoint(BaseModel):
+    anode_flow_rate_kg_s: float
+    cathode_flow_fraction: float
+    discharge_voltage_V: float
+    magnet_current_inner_A: float
+    magnet_current_outer_A: float
+
+class ControlFile(BaseModel):
+    metadata: ControlMetadata
+    control: ControlPoint
+
+def read_control_file(file, logger):
+    try:
+        with open(file, "r") as fd:
+            return ControlFile.model_validate_json(fd.read())
+    except ValidationError as e:
+        raise
+
+class ThrusterController:
+    def __init__(self, propellant: str = "Kr", verbose: bool = False):
+        self.setpoint = None
+        self.verbose = self.verbose
+        self.propellant = propellant
+
+    def control_to(self, setpoint: ControlPoint, client: LabViewClient):
+        if self.setpoint is None:
+            self.setpoint = setpoint
+
+        anode_flow_rate_mg_s = setpoint.anode_flow_rate_kg_s * 1e6
+        anode_flow_rate_sccm = anode_flow_rate_mg_s * MGS_TO_SCCM[self.propellant]
+        cathode_flow_rate_sccm = anode_flow_rate_sccm * setpoint.cathode_flow_fraction
+
+        # Calculate the expected current so we can set appropriate current limits
+        expected_current = anode_flow_rate_mg_s * CURRENT_PER_FLOW[self.propellant]
+        overcurrent = 3 * expected_current
+        current_limit = 1.25 * overcurrent
+
+        # Set the power supply
+        magna_control = MagnaControl(
+            voltage_limit=setpoint.discharge_voltage_V,
+            current_limit=current_limit,
+            overcurrent_trip=overcurrent,
+            overvoltage_trip=2.5 * setpoint.discharge_voltage_v,
+            enable=True,
+        )
+
+        # Set the flow controllers
+        anode_flow_control = AlicatControl(label="anode", setpoint=anode_flow_rate_sccm, units="sccm")
+        cathode_flow_control = AlicatControl(label="cathode", setpoint=cathode_flow_rate_sccm, units="sccm")
+        alicat_control = [anode_flow_control, cathode_flow_control]
+
+        # Set the magnet power supplies
+        VOLTAGE_LIMIT=float('inf')
+        lambda_control = [
+            LambdaControl(
+                label=label, current_limit=current,
+                voltage_limit=VOLTAGE_LIMIT, current_limit=VOLTAGE_LIMIT,
+                enable=True
+            )
+            for label, current in zip(
+                ["inner", "outer"],
+                [setpoint.magnet_current_inner_A, setpoint.magnet_current_outer_A]
+            )
+        ]
+
+        labview.set_magna_control(client, magna_control, self.verbose)
+        labview.set_alicat_control(client, alicat_control, self.verbose)
+        labview.set_lambda_control(client, lambda_control, self.verbose)
+        return DeviceCommands(magna_control, alicat_control, lambda_control)
+
+    def take_data(self, client: LabViewClient):
+        dmm_readings = labview.get_dmm_readings(client)
+        magna_readings = labview.get_magna_readings(client)
+        alicat_readings = labview.get_alicat_readings(client)
+        lambda_readings = labview.get_lambda_readings(client)
+        oscope_readings = labview.get_oscope_readings(client)
+
+        return {
+            "dmm": dmm_readings,
+            "magna": magna_readings,
+            "alicat": {r.label: r for r in alicat_readings},
+            "lambda": {r.label: r for r in lambda_readings},
+            "oscope": {r.label: r for r in oscope_readings},
+        }
