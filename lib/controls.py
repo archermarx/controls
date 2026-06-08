@@ -1,6 +1,4 @@
 import time
-from tqdm import tqdm
-
 from pydantic import BaseModel, ValidationError
 
 import lib.labview as labview
