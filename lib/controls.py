@@ -171,7 +171,7 @@ class ThrusterController:
             variable_settings = {
                 "Anode Current": dict(offset=self.current_limit/2, range=self.current_limit),
                 "Cathode Current": dict(offset=self.current_limit/2, range=self.current_limit),
-                "Discharge Voltage": dict(offset=self.discharge_voltage, range=self.discharge_voltage/3),
+                "Discharge Voltage": dict(offset=self.setpoint.discharge_voltage_V, range=self.setpoint.discharge_voltage_V/3),
                 "C2G Voltage": dict(offset=-15, range=30),
             }
             configs = [
@@ -181,11 +181,6 @@ class ThrusterController:
             labview.set_oscope_config(client, configs)
             prelim_readings = labview.get_oscope_readings(client)
 
-            while True:
-                yn = input("Preliminary range set. Continue? (y/n): ")
-                if yn.casefold() == "y":
-                    break
-            
             # Configure oscope to collect waveforms
             # For each channel, we need to get the mean and p2p and use this to set the range
             waveform_configs = []
