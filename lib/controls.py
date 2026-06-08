@@ -63,7 +63,7 @@ def status_str(t):
 class ThrusterController:
     def __init__(self, propellant: str = "Kr", verbose: bool = False):
         self.setpoint = None
-        self.verbose = self.verbose
+        self.verbose = verbose
         self.propellant = propellant
 
     def control_to(self, setpoint: ControlPoint, client: LabViewClient):
@@ -112,7 +112,13 @@ class ThrusterController:
         labview.set_lambda_control(client, lambda_control, self.verbose)
         return DeviceCommands(magna_control, alicat_control, lambda_control)
 
-    def take_data(self, client: LabViewClient, delay = 0):
+    def take_data(self, client: LabViewClient, delay: int = 0, sources: list[str] | None = None):
+        if sources is None:
+            sources = ["dmm", "magna", "alicat", "lambda", "oscope"]
+
+        if len(sources) == 0:
+            raise ValueError("Sources array must not be empty!")
+
         # Pause according to prescribed delay
         if delay > 0:
             print()
@@ -123,16 +129,20 @@ class ThrusterController:
                 time.sleep(1)
         print("\nTaking data...")
 
-        dmm_readings = labview.get_dmm_readings(client)
-        magna_readings = labview.get_magna_readings(client)
-        alicat_readings = labview.get_alicat_readings(client)
-        lambda_readings = labview.get_lambda_readings(client)
-        oscope_readings = labview.get_oscope_readings(client)
+        out = {}
+        if "dmm" in sources:
+            out["dmm"] = labview.get_dmm_readings(client)
+        if "magna" in sources:
+            out["magna"] = labview.get_magna_readings(client)
+        if "alicat" in sources:
+            alicat_readings = labview.get_alicat_readings(client)
+            out["alicat"] = {r.label: r for r in alicat_readings},
+        if "lambda" in sources:
+            lambda_readings = labview.get_lambda_readings(client)
+            out["lambda"] = {r.label: r for r in lambda_readings},
+        if "oscope" in sources:
+            oscope_readings = labview.get_oscope_readings(client)
+            out["oscope"] = {r.label: r for r in oscope_readings},
 
-        return {
-            "dmm": dmm_readings,
-            "magna": magna_readings,
-            "alicat": {r.label: r for r in alicat_readings},
-            "lambda": {r.label: r for r in lambda_readings},
-            "oscope": {r.label: r for r in oscope_readings},
-        }
+        return out
+        
