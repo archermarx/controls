@@ -6,9 +6,8 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-import controls
-import labview
-from labview import LabViewClient
+import lib.controls as controls
+from lib.labview import LabViewClient
 
 logger = logging.getLogger(__name__)
 parser = argparse.ArgumentParser()
@@ -79,15 +78,7 @@ if __name__ == "__main__":
 
                 # Taking data
                 if args.data_file is not None:
-                    print()
-                    for t in range(args.data_wait_time, 0, -1):
-                        time_str = f"{t} s"
-                        print("\r", end="")
-                        logger.info(f"Waiting to take data. Time remaining: " + time_str)
-                        time.sleep(1)
-                    logger.info("Taking data...")
-
-                    data = controller.take_data(client=client)
+                    data = controller.take_data(client=client, delay=args.data_wait_time)
 
                     # Save data to file
                     with open(args.data_file, "w") as fd:

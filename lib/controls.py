@@ -1,6 +1,9 @@
+import time
+from tqdm import tqdm
+
 from pydantic import BaseModel, ValidationError
 
-import labview
+import labview as labview
 from labview import LabViewClient, MagnaControl, AlicatControl, LambdaControl, \
                     DeviceCommands
 
@@ -40,6 +43,22 @@ def read_control_file(file, logger):
             return ControlFile.model_validate_json(fd.read())
     except ValidationError as e:
         raise
+
+def time_str(s):
+    if s >= 3600:
+        h = s // 3600
+        m = (s - 3600*h) // 60
+        s = s - 3600*h - 60*m
+        return f"{h}h {m}m {s}s"
+    elif s >= 60:
+        m = s // 60
+        s = s - 60*m
+        return f"{m}m {s}s"
+    else:
+        return f"{s} s"
+
+def status_str(t):
+    return f"Waiting to take data. Time remaining: " + time_str(t) + "."
 
 class ThrusterController:
     def __init__(self, propellant: str = "Kr", verbose: bool = False):
@@ -93,7 +112,17 @@ class ThrusterController:
         labview.set_lambda_control(client, lambda_control, self.verbose)
         return DeviceCommands(magna_control, alicat_control, lambda_control)
 
-    def take_data(self, client: LabViewClient):
+    def take_data(self, client: LabViewClient, delay = 0):
+        # Pause according to prescribed delay
+        if delay > 0:
+            print()
+            line_len = len(status_str(delay))
+            for t in range(delay, 0, -1):
+                print(" "*line_len, end="\r")
+                print(status_str(t), end="\r")
+                time.sleep(1)
+        print("\nTaking data...")
+
         dmm_readings = labview.get_dmm_readings(client)
         magna_readings = labview.get_magna_readings(client)
         alicat_readings = labview.get_alicat_readings(client)
