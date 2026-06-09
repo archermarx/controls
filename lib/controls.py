@@ -91,7 +91,14 @@ class ThrusterController:
         self.flow_range = flow_range
         self.cathode_flow_range = (0.05 * flow_range[0], 0.1 * flow_range[1])
 
-    def control_to(self, setpoint: ControlPoint, client: LabViewClient):
+    def control_to(
+            self,
+            setpoint: ControlPoint,
+            client: LabViewClient,
+            set_lambdas: bool = True,
+            set_alicats: bool = True,
+            set_magna: bool = True,
+            ):
         self.setpoint = setpoint
 
         anode_flow_rate_mg_s = setpoint.anode_flow_rate_kg_s * 1e6
@@ -155,9 +162,15 @@ class ThrusterController:
             )
         ]
 
-        labview.set_magna_control(client, magna_control, self.verbose)
-        labview.set_alicat_control(client, alicat_control, self.verbose)
-        labview.set_lambda_control(client, lambda_control, self.verbose)
+        if set_magna:
+            labview.set_magna_control(client, magna_control, self.verbose)
+
+        if set_alicats:
+            labview.set_alicat_control(client, alicat_control, self.verbose)
+
+        if set_lambdas:
+            labview.set_lambda_control(client, lambda_control, self.verbose)
+            
         return DeviceCommands(magna_control, alicat_control, lambda_control)
 
     def take_data(self, client: LabViewClient, delay: int = 0, sources: list[str] | None = None):

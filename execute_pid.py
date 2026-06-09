@@ -100,7 +100,7 @@ def main(args):
 
     with labview.LabViewClient(host=args.host_ip, port=args.port) as client:
         print("Setting initial point and sleeping for 20 seconds")
-        controller.control_to(setpoint, client)
+        controller.control_to(setpoint, client, set_lambdas=False, set_magna=False)
         settle_start_time = time.monotonic()
         flow_times.append(settle_start_time - start_time)
         flow_rates.append(setpoint.anode_flow_rate_kg_s * 1e6)
