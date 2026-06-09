@@ -15,14 +15,15 @@ def pid_mass_flow_step(
     dt: float,
     state: PIDState,
     kp: float,
-    ki: float,
-    kd: float,
+    Ti: float,
+    Td: float,
     min_flow: float,
     max_flow: float,
     control_direction: float = 1.0,
     integral_limit: float | None = None,
 ) -> float:
 
+    print(f"{nominal_flow=}, {min_flow=}, {max_flow=}")
 
     if dt <= 0.0:
         raise ValueError("dt must be greater than zero")
@@ -39,7 +40,6 @@ def pid_mass_flow_step(
     if control_direction not in (-1.0, 1.0):
         raise ValueError("control_direction should be either +1.0 or -1.0")
     
-
     error = target_current - measured_current
 
     if state.previous_error is None:
@@ -53,6 +53,9 @@ def pid_mass_flow_step(
         candidate_integral = max(
             -integral_limit, min(integral_limit, candidate_integral)
         )
+
+    ki = kp / Ti
+    kd = kp * Td
 
     proportional = kp * error
     integral = ki * candidate_integral

@@ -63,8 +63,17 @@ def status_str(t):
 def calibrate(val, cal):
     return val * cal[0] + cal[1]
 
+def apply_limits(val, range):
+    if val < range[0] or val < range[1]:
+        raise ValueError(f"Value {val} exceeded range of {range}")
+
 class ThrusterController:
-    def __init__(self, propellant: str = "Kr", verbose: bool = False):
+    def __init__(
+            self, propellant: str = "Kr",
+            verbose: bool = False,
+            voltage_range: tuple[float, float] = (200, 600),
+            flow_range: tuple[float, float] = (100, 800),
+        ):
         self.setpoint = None
         self.verbose = verbose
         self.propellant = propellant
@@ -76,6 +85,10 @@ class ThrusterController:
         self.anode_flow_cal   = (1.002283, 0.554064)
         self.cathode_flow_cal = (1.0, 0.0)
 
+        # Limits
+        self.voltage_range = voltage_range
+        self.flow_range = flow_range
+
     def control_to(self, setpoint: ControlPoint, client: LabViewClient):
         if self.setpoint is None:
             self.setpoint = setpoint
@@ -84,16 +97,21 @@ class ThrusterController:
         anode_flow_rate_sccm = anode_flow_rate_mg_s * MGS_TO_SCCM[self.propellant]
         cathode_flow_rate_sccm = anode_flow_rate_sccm * setpoint.cathode_flow_fraction
 
+        MAX_CURRENT = 800
+
         # Calculate the expected current so we can set appropriate current limits
         expected_current = anode_flow_rate_mg_s * CURRENT_PER_FLOW[self.propellant]
-        overcurrent = 3 * expected_current
+        overcurrent = min(3 * expected_current, MAX_CURRENT)
         current_limit = 1.25 * overcurrent
         overvoltage = 1000
         self.current_limit = current_limit
 
         # Set the power supply
         magna_control = MagnaControl(
-            voltage_limit=calibrate(setpoint.discharge_voltage_V, self.voltage_cal),
+            voltage_limit=apply_limits(
+                calibrate(setpoint.discharge_voltage_V, self.voltage_cal),
+                self.voltage_range
+            ),
             current_limit=current_limit,
             overcurrent_trip=overcurrent,
             overvoltage_trip=overvoltage,
@@ -103,12 +121,18 @@ class ThrusterController:
         # Set the flow controllers
         anode_flow_control = AlicatControl(
             label="anode",
-            setpoint=calibrate(anode_flow_rate_sccm, self.anode_flow_cal),
+            setpoint=apply_limits(
+                calibrate(anode_flow_rate_sccm, self.anode_flow_cal),
+                self.flow_range
+            ),
             units="sccm"
         )
         cathode_flow_control = AlicatControl(
             label="cathode",
-            setpoint=calibrate(cathode_flow_rate_sccm, self.cathode_flow_cal),
+            setpoint=apply_limits(
+                calibrate(cathode_flow_rate_sccm, self.cathode_flow_cal),
+                self.flow_range,
+            ),
             units="sccm"
         )
         alicat_control = [anode_flow_control, cathode_flow_control]
@@ -172,7 +196,7 @@ class ThrusterController:
                 "Anode Current": dict(offset=self.current_limit/2, range=self.current_limit),
                 "Cathode Current": dict(offset=self.current_limit/2, range=self.current_limit),
                 "Discharge Voltage": dict(offset=self.setpoint.discharge_voltage_V, range=self.setpoint.discharge_voltage_V/3),
-                "C2G Voltage": dict(offset=-15, range=30),
+                "C2G Voltage": dict(offset=-18, range=40),
             }
             init_configs = [
                 labview.OscopeConfig(k, range=v["range"], offset=v["offset"], collect_waveforms=False)
@@ -187,7 +211,7 @@ class ThrusterController:
             for reading in prelim_readings:
                 waveform_configs.append(labview.OscopeConfig(
                     label=reading.label,
-                    range=1.5*reading.peak_to_peak,
+                    range=(1.5 if reading.label != "C2G Voltage" else 2.0) * reading.peak_to_peak,
                     offset=reading.average,
                     collect_waveforms=True,
                 ))
