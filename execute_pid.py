@@ -31,6 +31,8 @@ parser.add_argument("--verbose", "-v", action="store_true", help="Print PID loop
 parser.add_argument("--output", "-o", type=Path, default=Path("."), help="Folder where PID data is saved")
 parser.add_argument("--prefix", "-p", type=str, default="pid_mass_flow", help="Output filename prefix")
 
+parser.add_argument("--setpoint", "-s", type=str, required=True, help="Setpoint file, used to read normalization info")
+
 def main(args):
     output_dir = Path(args.output)
     os.makedirs(output_dir, exist_ok=True)
@@ -45,13 +47,10 @@ def main(args):
     data_log = []
 
     controller = controls.ThrusterController("Kr")
-    setpoint = controls.ControlPoint(
-        magnet_current_inner_A=#,
-        magnet_current_outer_A=#,
-        discharge_voltage_V=300.0,
-        anode_flow_rate_kg_s=args.nominal_flow / 1e6,
-        cathode_flow_fraction=0.07
-    )
+
+    with open(args.setpoint, "rb") as fd:
+        setpoint = controls.ControlPoint.model_validate_json(fd.read())
+    setpoint.anode_flow_rate_kg_s = args.nominal_flow / 1e6 # convert mg/s to kg/s
 
     print("Starting PID mass-flow control.")
     print(f"Target current: {args.target_current} A")

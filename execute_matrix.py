@@ -11,7 +11,6 @@ import lib.labview as labview
 
 parser = argparse.ArgumentParser()
 parser.add_argument("test_matrix", type=Path, help="CSV file containing test points")
-parser.add_argument("--coil-currents", "-c", type=float, nargs=2, help="Inner and outer magnet coil currents at the 100 percent nominal b-field setting")
 parser.add_argument("--data", "-d", type=lambda s: s.split(","), help="Comma-separated list of data types to collect. Choices are 'magna', 'alicat', 'lambda', 'dmm', and 'oscope'. Defaults to writing all.")
 parser.add_argument("--output", "-o", type=Path, default=Path("."), help="Folder in which data will be written. Will be created if it does not already exist.")
 parser.add_argument("--prefix", "-p", type=str, default="data", help="Prefix to append to data files.")
@@ -21,6 +20,7 @@ parser.add_argument("--dwell-time", "-t", type=int, default=5, help="How long (i
 parser.add_argument("--host-ip", type=str, default=labview.LABVIEW_IP, help="The IP address of the LabVIEW client")
 parser.add_argument("--port", type=int, default=labview.LABVIEW_PORT, help="The port of the LabVIEW client")
 parser.add_argument("--interactive", "-i", action="store_true", help="Whether to ask the user before proceeding to the next control point")
+parser.add_argument("--setpoint", "-s", type=str, required=True, help="Setpoint file, used to read normalization info")
 
 def num_digits(n):
     if n > 0:
@@ -32,7 +32,11 @@ def num_digits(n):
     return digits
 
 def main(args):
-    inner_coil_current, outer_coil_current = args.coil_currents
+    with open(args.setpoint, "rb") as fd:
+        base_setpoint = controls.ControlPoint.model_validate_json(fd.read())
+    inner_coil_current = base_setpoint.magnet_current_inner_A
+    outer_coil_current = base_setpoint.magnet_current_outer_A
+    
     prefix = "" if not args.prefix else args.prefix + "_"
     data_types = ["magna", "dmm", "alicat", "lambda", "oscope"] if args.data is None else args.data
 
@@ -47,8 +51,10 @@ def main(args):
     os.makedirs(output_dir, exist_ok=True)
 
     num_elems = len(flow_rates)
-    ndigits = num_digits(num_elems)
+    ndigits = min(num_digits(num_elems), 2)
     filename_format = prefix + f"{{:0{ndigits}d}}.pkl"
+
+    starting_point = None
 
     with labview.LabViewClient(host=args.host_ip, port=args.port) as client:
         for (i, (mdot, vd, cff, bmag)) in enumerate(zip(flow_rates, discharge_voltages, cathode_flow_fractions, magnetic_field_strengths)):
@@ -60,10 +66,19 @@ def main(args):
                 magnet_current_inner_A=bmag*inner_coil_current,
                 magnet_current_outer_A=bmag*outer_coil_current,
             )
+
+            if i == 0:
+                starting_point = setpoint
             
             print(f"Setpoint {i+1}: {setpoint}")
             controller.control_to(setpoint, client)
             data = controller.take_data(client, delay=args.dwell_time, sources=data_types)
+
+            if "dmm" in data_types and "oscope" in data_types:
+                avg_current = data["dmm"].current
+                p2p_current = data["oscope"]["Anode Current"].peak_to_peak
+                print(f"Average current: {avg_current:.3f} A (p2p = {p2p_current:.3f})")
+
             out_file = output_dir / filename_format.format(i+1)
 
             output = {
@@ -75,12 +90,17 @@ def main(args):
                 pickle.dump(output, fd)
 
             print(f"Setpoint {i+1}: data written to {out_file}")
+            print()
 
             if args.interactive and i < num_elems - 1:
                 while True:
                     answer = input("Proceed to next point (y/n)? ")
                     if answer.casefold() == "y":
                         break
+
+        # Go back to start
+        print("Resetting to starting point")
+        controller.control_to(starting_point, client)
 
 if __name__ == "__main__":
     args = parser.parse_args()

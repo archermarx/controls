@@ -8,8 +8,11 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Other stuff
 uv.lock
 *.log
 ~$*
 *.csv
 *.png
+*.json
