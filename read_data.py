@@ -84,7 +84,10 @@ for file in os.listdir(dir):
     ax.plot(t, I)
     print()
 
-fig.savefig(os.path.join(output_dir, "oscillations.png"))
+plot_dir = os.path.join(output_dir, "plots")
+os.makedirs(plot_dir, exist_ok=True)
+
+fig.savefig(os.path.join(plot_dir, "oscillations.png"))
 
 xvars = [bfields, mdots, cffs, voltages]
 labels = ["bfield", "mdot", "cff", "voltage"]
@@ -108,4 +111,4 @@ for var, label, title in zip(xvars, labels, titles):
     axs[2].set(xlabel = title, ylabel = "Amplitude (%)", title = "Peak to peak (%)")
     axs[2].set_ylim(bottom=0.0)
 
-    fig.savefig(os.path.join(output_dir, f"{label}_sweep.png"), dpi=200)
+    fig.savefig(os.path.join(plot_dir, f"{label}_sweep.png"), dpi=200)
