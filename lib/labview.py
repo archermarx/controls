@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+from numpy.typing import NDArray
 
 from dataclasses import dataclass, asdict
 from typing import Any
@@ -37,6 +38,11 @@ CMD_OSCOPE_SET_CONFIG = 0x2A                        # Command 42
 CMD_OSCOPE_GET_READINGS = 0x2B                      # Command 43
                                                     
 CMD_DMM_GET_READINGS = 0x31                         # Command 49
+
+# TODO: fix these
+CMD_THRUSTSTAND_GET_READINGS = 57                     
+CMD_THRUSTSTAND_SET_CONFIG = 58                
+
 
 # ---------------------------------------------------------------------------
 
@@ -138,7 +144,7 @@ class OscopeAxis:
 class OscopeWaveform:
     x: OscopeAxis
     y: OscopeAxis
-    data: np.ndarray #[int]
+    data: NDArray[np.uint8]
 
     # Return physical x-axis values for each waveform point.
     # For Keysight-style waveform scaling: 
@@ -188,6 +194,25 @@ class OscopeConfig:
     range: float
     offset: float
     collect_waveforms: bool
+
+@dataclass
+class PIDGain:
+    Kp: float
+    Ki: float
+    Kd: float
+
+@dataclass
+class ThrustStandConfig:
+    num_points: int
+    gains: PIDGain
+
+@dataclass
+class ThrustStandReadings:
+    setpoint: NDArray[np.float64]
+    input: NDArray[np.float64]
+    command: NDArray[np.uint16]
+    shunt: NDArray[np.int16]
+    tilt: NDArray[np.float64]
 
 @dataclass
 class DeviceCommands:
@@ -263,6 +288,14 @@ class LabViewReader:
         if length < 0:
             raise ValueError(f"{context}: negative array length = {length}")
         return length
+
+    def read_array(self, dtype: np.typing.DTypeLike, context: str) -> np.ndarray:
+        length = self.array_length(context)
+        dt = np.dtype(dtype)
+        dt = dt.newbyteorder('>')
+        bytes = self.read_payload(length * dt.itemsize)
+        data = np.frombuffer(bytes, dtype=dt)
+        return data
 
     def assert_consume_all(self, context: str) -> None:
         if self.remaining() != 0:
@@ -411,11 +444,7 @@ def unpack_oscope_waveform(reader: LabViewReader) -> OscopeWaveform:
         reference = reader.u32(),
     )
 
-    n_points = reader.array_length("Oscope Wavefrom Data")
-    bytes = reader.read_payload(n_points)
-    dt = np.dtype(np.uint8)
-    dt = dt.newbyteorder('>')
-    data = np.frombuffer(bytes, dtype=dt)
+    data = reader.read_array(np.uint8, "Oscope waveform")
     return OscopeWaveform(x = x_axis, y = y_axis, data = data)
 
 def unpack_oscope_readings(payload: bytes) -> list[OscopeReadings]:
@@ -438,8 +467,21 @@ def unpack_oscope_readings(payload: bytes) -> list[OscopeReadings]:
         )
 
     reader.assert_consume_all("Oscope Readings")
-
     return output
+
+def unpack_thruststand_readings(payload: bytes) -> ThrustStandReadings:
+    reader = LabViewReader(payload)
+
+    readings = ThrustStandReadings(
+        setpoint = reader.read_array(np.float64, "Thrust stand setpoint"),
+        input = reader.read_array(np.float64, "Thrust stand input"),
+        command = reader.read_array(np.uint16, "Thrust stand command"),
+        shunt = reader.read_array(np.int16, "Thrust stand shunt"),
+        tilt = reader.read_array(np.float64, "Thrust stand tilt"),
+    )
+
+    reader.assert_consume_all("Thrust stand readings")
+    return readings
 
 # PEPL Lab Device Specific Packing Functions
 def pack_magna_control(control: MagnaControl, verbose=False) -> bytes:
@@ -508,7 +550,19 @@ def pack_lambda_control(controls: list[LambdaControl], verbose=False) -> bytes:
         print("Lambda bytes:", bytes)
     
     return bytes
+
+def pack_thruststand_config(config: ThrustStandConfig, verbose=False) -> bytes:
+    writer = LabViewWriter()
+
+    writer.u16(config.num_points)
+    writer.f64(config.gains.Kp)
+    writer.f64(config.gains.Ki)
+    writer.f64(config.gains.Kd)
     
+    bytes = writer.bytes()
+    if verbose:
+        print(f"Thrust stand config bytes:", bytes)
+    return bytes
 
 # TCP Client 
 def receive_from_labview(socket: socket.socket, n_bytes: int) -> bytes:
@@ -648,6 +702,14 @@ def get_dmm_readings(client: LabViewClient) -> KeysightDMMReadings:
 def set_oscope_config(client: LabViewClient, config: list[OscopeConfig]) -> None:
     response = client.request(CMD_OSCOPE_SET_CONFIG, pack_oscope_config(config))
     return check_empty_ack("Oscope set config", response)
+
+def set_thruststand_config(client: LabViewClient, config: ThrustStandConfig) -> None:
+    response = client.request(CMD_THRUSTSTAND_SET_CONFIG, pack_thruststand_config(config))
+    return check_empty_ack("Thrust stand set config", response)
+
+def get_thruststand_readings(client: LabViewClient) -> ThrustStandReadings:
+    payload = client.request(CMD_THRUSTSTAND_GET_READINGS, empty_payload())
+    return unpack_thruststand_readings(payload)
 
 # Raw LabVIEW Collection
 def get_all_readings(client: LabViewClient, *, include_oscope: bool = True) -> dict[str, Any]:
