@@ -292,6 +292,8 @@ class Surrogate:
             theta0=self.theta0,
             corr=self.corr,
             print_global=False,
+            eval_noise=True,
+            hyper_opt="Cobyla",
         )
 
         model.set_training_values(X_unique, Y_unique.reshape(-1, 1))

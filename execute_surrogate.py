@@ -4,22 +4,21 @@ import pickle
 from pathlib import Path
 
 import numpy as np
+import matplotlib.pyplot as plt
 
 import lib.controls as controls
 import lib.labview as labview
 from lib.surrogate import Surrogate
 from lib.metrics import make_metric
 
-
 INITIAL_CONTROL_MULTIPLIERS = np.array(
     [
         [1.00],  # original setpoint
-        [1.05],  # +5%
-        [0.95],  # -5%
+        [1.20],  # +5%
+        [0.80],  # -5%
     ],
     dtype=float,
 )
-
 
 parser = argparse.ArgumentParser()
 
@@ -27,7 +26,6 @@ parser.add_argument("--setpoint", "-s", type=Path, required=True)
 parser.add_argument("--control-vars", type=str, required=True)
 parser.add_argument("--bounds", type=str, required=True)
 
-parser.add_argument("--metric", type=str, default="rms_percent")
 parser.add_argument("--target-current", type=float, default=None)
 
 parser.add_argument(
@@ -56,7 +54,26 @@ parser.add_argument("--allow-current-mismatch", action="store_true")
 parser.add_argument("--output", "-o", type=Path, default=Path("."))
 parser.add_argument("--prefix", "-p", type=str, default="surrogate")
 parser.add_argument("--reset-at-end", action="store_true")
+parser.add_argument("--interactive", action="store_true")
 
+def compute_rms_amplitude_master(data):
+    dmm: labview.KeysightDMMReadings = data["dmm"]
+    anode_current: labview.OscopeReadings = data["oscope"]["Anode Current"]
+
+    time, current = anode_current.waveform.time_values(), anode_current.waveform.y_values()
+    mean_oscope = np.mean(current)
+    mean_dmm = dmm.current
+    current_centered = current - mean_oscope
+
+    # centered rms = sqrt(mean((I - I_mean)^2))
+    rms_current = np.sqrt(np.mean((current_centered)**2))
+    return rms_current, rms_current/mean_dmm
+
+def rms_amplitude_raw(data, *args, **kwargs):
+    return compute_rms_amplitude_master(data)[0]
+
+def rms_amplitude_pct(data, *args, **kwargs):
+    return compute_rms_amplitude_master(data)[1]
 
 def parse_control_vars(text):
     return [x.strip() for x in text.split(",") if x.strip()]
@@ -137,14 +154,7 @@ def main(args):
 
     base_setpoint = read_setpoint(args.setpoint)
 
-    metric_fn = make_metric(
-        args.metric,
-        target_current=args.target_current,
-        max_abs_offset_A=args.max_current_offset_A,
-        max_rel_offset=args.max_current_offset_frac,
-        require_dmm=True,
-        raise_on_failure=not args.allow_current_mismatch,
-    )
+    metric_fn = rms_amplitude_pct
 
     surrogate = Surrogate(
         dim=dim,
@@ -177,7 +187,6 @@ def main(args):
     print("Starting surrogate control.")
     print(f"Control variables: {control_vars}")
     print(f"Bounds: {bounds}")
-    print(f"Metric: {args.metric}")
     print(f"Data sources: {args.data}")
     print(f"Steps: {args.num_steps}")
     print(f"Hard-coded initial points: {num_initial_points}")
@@ -190,6 +199,7 @@ def main(args):
     print()
 
     log = []
+    should_exit=False
 
     with labview.LabViewClient(host=args.host_ip, port=args.port) as client:
         for step in range(args.num_steps):
@@ -223,6 +233,18 @@ def main(args):
             print(f"Step {step + 1}/{args.num_steps}")
             print(f"Point source: {point_source}")
             print(f"Commanding: {setpoint}")
+            if args.interactive:
+                while True:
+                    inp = input(f"Continue? (y/n): ")
+                    if inp.casefold() == "y":
+                        break
+                    elif inp.casefold() == "n":
+                        should_exit=True
+                        break
+
+            if should_exit:
+                print("Exiting!")
+                break
 
             controller.control_to(setpoint, client)
 
@@ -232,44 +254,30 @@ def main(args):
                 sources=args.data,
             )
 
-            try:
-                z_actual = metric_fn(
-                    data,
-                    setpoint=setpoint,
-                    control_vector=c_current,
-                )
+            z_actual = metric_fn(data)
 
-            except Exception as error:
-                print()
-                print(f"Metric failed: {error}")
-                print("Not updating surrogate with this point.")
-                print("Stopping safely.")
-
-                sample = {
-                    "step": step + 1,
-                    "status": "metric_failed",
-                    "error": str(error),
-                    "metric": args.metric,
-                    "point_source": point_source,
-                    "control_vars": control_vars,
-                    "control_vector": c_current,
-                    "setpoint": setpoint.model_dump(),
-                    "data": data,
-                }
-
-                out_file = output_dir / f"{args.prefix}_{step + 1:03d}_failed.pkl"
-
-                with open(out_file, "wb") as fd:
-                    pickle.dump(sample, fd)
-
-                break
+            mean_current = data["dmm"].current
+            rms_pct = rms_amplitude_pct(data)
+            rms_raw = rms_amplitude_raw(data)
+            print(f"Mean: {mean_current:.3f} A, RMS Amplitude: {rms_raw:.3f} A ({rms_pct*100:.2f}%)")
 
             surrogate.update(c_current, z_actual)
+            if surrogate.is_trained:
+                fig, axs = plt.subplots(2,1, layout='constrained', figsize=(6,6))
+                surrogate.plot_1d_on_axis(axs[1])
+
+                lb, ub = bounds[0]
+                x = np.linspace(lb, ub, 100)
+                ei = [surrogate.expected_improvement([_x]) for _x in x]
+                axs[0].plot(x, ei, color = 'red')
+                axs[0].set(title="Expected improvement", xticklabels = [], xlim=(lb, ub))
+
+                fig.savefig("surrogate.png")
+                plt.close(fig)
 
             sample = {
                 "step": step + 1,
                 "status": "ok",
-                "metric": args.metric,
                 "point_source": point_source,
                 "z_actual": z_actual,
                 "z_pred": z_pred,

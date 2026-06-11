@@ -119,8 +119,4 @@ def main(args):
 
 if __name__ == "__main__":
     args = parser.parse_args()
-    if args.coil_currents is None:
-        raise ValueError("No coil currents specified!")
-
-
     main(args)

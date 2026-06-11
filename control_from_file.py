@@ -37,7 +37,7 @@ def check_for_change(file: Path, counter, last_modified, contents, logger):
     if new_counter > counter:
         return new_counter, modified_time, contents.control, True
     else:
-        return counter, last_modified, {}, False
+        return counter, last_modified, None, False
 
 if __name__ == "__main__":
     args = parser.parse_args()
@@ -67,6 +67,7 @@ if __name__ == "__main__":
         while True:
             counter, last_modified, control, changed = check_for_change(control_file, counter, last_modified, contents, logger)
             if changed:
+                assert isinstance(control, controls.ControlPoint)
                 control_dict = control.model_dump()
                 status_str = f"New setpoint received (counter={counter})"
                 status_str = "\n" + status_str + "\n" + "-"*len(status_str) + "\n"

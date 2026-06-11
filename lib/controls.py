@@ -174,18 +174,18 @@ class ThrusterController:
         return DeviceCommands(magna_control, alicat_control, lambda_control)
 
     def take_data(self, client: LabViewClient, delay: int = 0, sources: list[str] | None = None):
-        if sources is None:
-            sources = ["dmm", "magna", "alicat", "lambda", "oscope"]
-        sources = set(sources)
-
-        if len(sources) == 0:
-            raise ValueError("Sources array must not be empty!")
+        assert self.setpoint is not None
+        
+        if not sources: 
+            data_sources = set(["dmm", "magna", "alicat", "lambda", "oscope", "thruststand"])
+        else:
+            data_sources = set(sources)
 
         # Configure oscope to not collect waveforms so we can grab the averages and peak to peak amplitudes
         # The oscope has 8-bit depth so we want to ensure we get maximum resolution when we get waveforms
         # This requires that we rescale things on the fly
         # Note: the keys are hard-coded here. We shouldn't do this.
-        if "oscope" in sources:
+        if "oscope" in data_sources:
             variable_settings = {
                 "Anode Current": dict(offset=self.current_limit/2, range=self.current_limit),
                 "Cathode Current": dict(offset=self.current_limit/2, range=self.current_limit),
@@ -208,17 +208,19 @@ class ThrusterController:
         print("\nTaking data...")
 
         out = {}
-        if "dmm" in sources:
+        if "thruststand" in data_sources:
+            out["thruststand"] = labview.get_thruststand_readings(client)
+        if "dmm" in data_sources:
             out["dmm"] = labview.get_dmm_readings(client)
-        if "magna" in sources:
+        if "magna" in data_sources:
             out["magna"] = labview.get_magna_readings(client)
-        if "alicat" in sources:
+        if "alicat" in data_sources:
             alicat_readings = labview.get_alicat_readings(client)
             out["alicat"] = {r.label: r for r in alicat_readings}
-        if "lambda" in sources:
+        if "lambda" in data_sources:
             lambda_readings = labview.get_lambda_readings(client)
             out["lambda"] = {r.label: r for r in lambda_readings}
-        if "oscope" in sources:
+        if "oscope" in data_sources:
             max_attempts = 3
             for attempt in range(max_attempts):
                 # Read oscope to get p2p and average so we can rescale to a tighter window

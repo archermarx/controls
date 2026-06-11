@@ -18,3 +18,4 @@ uv.lock
 *.json
 extract_current.py
 surrogate_optimize.py
+*.pkl
