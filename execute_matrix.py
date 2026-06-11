@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import pickle
 
+import numpy as np
 import pandas as pd
 
 import lib.controls as controls
@@ -29,7 +30,21 @@ def num_digits(n):
         digits = 1
     else:
         digits = int(math.log10(-n))+2 # +1 if you don't count the '-' 
+    
     return digits
+
+def compute_rms_amplitude(data):
+    dmm: labview.KeysightDMMReadings = data["dmm"]
+    anode_current: labview.OscopeReadings = data["oscope"]["Anode Current"]
+
+    time, current = anode_current.waveform.time_values(), anode_current.waveform.y_values()
+    mean_oscope = np.mean(current)
+    mean_dmm = dmm.current
+    current_rescaled = current - mean_oscope + mean_dmm
+
+    # centered rms = sqrt(mean((I - I_mean)^2))
+    rms_current = np.std(current_rescaled)
+    return rms_current
 
 def main(args):
     with open(args.setpoint, "rb") as fd:

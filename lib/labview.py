@@ -138,12 +138,12 @@ class OscopeAxis:
 class OscopeWaveform:
     x: OscopeAxis
     y: OscopeAxis
-    data: list[int]
+    data: np.ndarray #[int]
 
     # Return physical x-axis values for each waveform point.
     # For Keysight-style waveform scaling: 
     #           time[i] = (i - x_reference) * x_increment + x_origin
-    def time_values(self) -> list[float]:
+    def time_values(self) -> np.ndarray:
         if len(self.data) > 0:
             time = np.array([
                 (i - self.x.reference) * self.x.increment + self.x.origin
@@ -156,11 +156,11 @@ class OscopeWaveform:
 
     # For Keysight-style waveform scaling:
     #           signal[i] = (raw[i] - y_reference) * y_increment + y_origin
-    def y_values(self) -> list[float]:
-        return [
+    def y_values(self) -> np.ndarray:
+        return np.array([
             (float(raw_point) - self.y.reference) * self.y.increment + self.y.origin
             for raw_point in self.data
-        ]
+        ])
     
     @property
     def sample_rate(self) -> float | None:
@@ -187,7 +187,7 @@ class OscopeConfig:
     label: str
     range: float
     offset: float
-    collect_waveforms: True
+    collect_waveforms: bool
 
 @dataclass
 class DeviceCommands:

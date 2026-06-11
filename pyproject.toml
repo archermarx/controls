@@ -9,5 +9,6 @@ dependencies = [
     "numpy>=2.4.6",
     "pandas>=3.0.3",
     "pydantic>=2.13.4",
+    "scipy>=1.17.1",
     "tqdm>=4.68.1",
 ]
