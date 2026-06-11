@@ -16,3 +16,5 @@ uv.lock
 *.csv
 *.png
 *.json
+extract_current.py
+surrogate_optimize.py

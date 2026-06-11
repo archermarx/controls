@@ -115,7 +115,7 @@ def main(args):
 
         # Go back to start
         print("Resetting to starting point")
-        controller.control_to(starting_point, client)
+        controller.control_to(starting_point, client) #type: ignore
 
 if __name__ == "__main__":
     args = parser.parse_args()
