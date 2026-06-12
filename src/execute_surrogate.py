@@ -5,6 +5,7 @@ from pathlib import Path
 
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt
 
 import lib.controls as controls
 import lib.labview as labview
@@ -26,7 +27,8 @@ parser.add_argument("--port", type=int, default=labview.LABVIEW_PORT)
 parser.add_argument("--verbose", "-v", action="store_true")
 
 parser.add_argument("--optimize-restarts", type=int, default=25)
-parser.add_argument("--acquisition", type=str, choices=["ei", "mean"], default="ei")
+parser.add_argument("--acquisition", type=str, choices=["ei", "mean", "ei_eig"], default="ei")
+parser.add_argument("--plot-acquisition", type=str, choices=["ei", "mean", "ei_eig"], default=None)
 parser.add_argument("--seed", type=int, default=1)
 
 parser.add_argument("--max-current-offset-A", type=float, default=2.0)
@@ -107,6 +109,42 @@ def vector_to_setpoint(base_setpoint, control_vars, c):
     for name, value in zip(control_vars, c):
         setattr(setpoint, name, float(value))
     return setpoint
+
+def plot_acquisition(ax, surrogate, bounds, mode):
+    lb, ub = bounds[0]
+    x = np.linspace(lb, ub, 100)
+
+    if mode == "mean":
+        y = [surrogate([_x]) for _x in x]
+        ax.plot(x, y, color="red")
+        ax.set(title="Predicted mean", xticklabels=[], xlim=(lb, ub))
+        return
+
+    if mode == "ei":
+        y = [surrogate.expected_improvement([_x]) for _x in x]
+        ax.plot(x, y, color="red")
+        ax.set(title="Expected improvement", xticklabels=[], xlim=(lb, ub))
+        return
+
+    if mode == "ei_eig":
+        y = []
+
+        for _x in x:
+            if surrogate.is_near_bounds([_x]):
+                y.append(surrogate.expected_information_gain([_x]))
+            else:
+                y.append(surrogate.expected_improvement([_x]))
+
+        ax.plot(x, y, color="red")
+
+        edge = surrogate.boundary_eig_frac * (ub - lb)
+        ax.axvspan(lb, lb + edge, alpha=0.15)
+        ax.axvspan(ub - edge, ub, alpha=0.15)
+
+        ax.set(title="Expected improvement / information gain", xticklabels=[], xlim=(lb, ub))
+        return
+
+    raise ValueError(f"Unknown plot acquisition mode: {mode}")
 
 def main(args):
     control_vars = parse_control_vars(args.control_vars)
@@ -234,11 +272,13 @@ def main(args):
                     fig, axs = plt.subplots(2,1, layout='constrained', figsize=(6,6))
                     surrogate.plot_1d_on_axis(axs[1])
 
-                    lb, ub = bounds[0]
-                    x = np.linspace(lb, ub, 100)
-                    ei = [surrogate.expected_improvement([_x]) for _x in x]
-                    axs[0].plot(x, ei, color = 'red')
-                    axs[0].set(title="Expected improvement", xticklabels = [], xlim=(lb, ub))
+                    plot_mode = args.acquisition if args.plot_acquisition is None else args.plot_acquisition
+                    plot_acquisition(
+                        axs[0],
+                        surrogate,
+                        bounds,
+                        plot_mode,
+                    )
 
                     fig.savefig("surrogate.png")
                     plt.close(fig)

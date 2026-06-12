@@ -13,11 +13,13 @@ class Surrogate:
         bounds=None,
         min_points=None,
         theta0=None,
-        corr="matern32",
+        corr="squar_exp",
         optimize_restarts=10,
         acquisition="ei",
         xi=0.0,
         seed=None,
+        boundary_eig_frac=0.05,
+        eig_noise=1e-12,
     ):
         self.dim = dim
         self.bounds = bounds
@@ -26,14 +28,23 @@ class Surrogate:
         self.corr = corr
         self.optimize_restarts = optimize_restarts
 
-        if acquisition not in {"mean", "ei"}:
-            raise ValueError("acquisition must be 'mean' or 'ei'")
+        if acquisition not in {"mean", "ei", "ei_eig"}:
+            raise ValueError("acquisition must be 'mean', 'ei', or 'ei_eig'")
 
         if xi < 0.0:
             raise ValueError("xi must be nonnegative")
 
         self.acquisition = acquisition
         self.xi = float(xi)
+
+        self.boundary_eig_frac = float(boundary_eig_frac)
+        self.eig_noise = float(eig_noise)
+
+        if not (0.0 <= self.boundary_eig_frac <= 0.5):
+            raise ValueError("boundary_eig_frac must be between 0.0 and 0.5")
+
+        if self.eig_noise <= 0.0:
+            raise ValueError("eig_noise must be positive")
 
         self.rng = np.random.default_rng(seed)
 
@@ -95,8 +106,8 @@ class Surrogate:
 
         mode = self.acquisition if acquisition is None else acquisition
 
-        if mode not in {"mean", "ei"}:
-            raise ValueError("acquisition must be 'mean' or 'ei'")
+        if mode not in {"mean", "ei", "ei_eig"}:
+            raise ValueError("acquisition must be 'mean', 'ei', or 'ei_eig'")
 
         if len(self.Y) == 0:
             c0 = self._default_control()
@@ -131,7 +142,7 @@ class Surrogate:
                     self.X[int(idx)].copy()
                 )
 
-        elif mode == "ei":
+        elif mode in {"ei", "ei_eig"}:
             # Do not rely primarily on observed points for EI.
             # At observed points, Kriging variance and EI are usually near zero.
             for idx in np.argsort(self.Y)[: min(3, len(self.Y))]:
@@ -148,6 +159,15 @@ class Surrogate:
                 starts.append(
                     self._clip(center + jitter)
                 )
+
+            if mode == "ei_eig":
+                for lo, hi in bounds:
+                    width = hi - lo
+                    edge = self.boundary_eig_frac * width
+
+                    if self.dim == 1:
+                        starts.append(np.array([lo + 0.5 * edge]))
+                        starts.append(np.array([hi - 0.5 * edge]))
 
         # Add random multistart locations for either acquisition.
         for _ in range(self.optimize_restarts):
@@ -262,11 +282,65 @@ class Surrogate:
 
         return max(0.0, float(ei))
 
+    def expected_information_gain(self, x) -> float:
+        """
+        Expected information gain proxy.
+
+        For a Gaussian/Kriging model, information gain is monotonic with predictive
+        variance. Since measurement noise is not explicitly modeled here, this uses
+        0.5 * log(1 + variance / eig_noise).
+
+        A larger value means x is more informative to sample.
+        """
+
+        if not self.is_trained:
+            return 0.0
+
+        var = self.variance(x)
+        eig = 0.5 * np.log1p(var / self.eig_noise)
+
+        return max(0.0, float(eig))
+
+    def is_near_bounds(self, x) -> bool:
+        """
+        Return True if x is within boundary_eig_frac of any lower or upper bound.
+
+        Example:
+            bounds = 250:400
+            boundary_eig_frac = 0.05
+
+            range = 150
+            edge width = 7.5
+
+            EIG region is:
+                250 to 257.5
+                392.5 to 400
+        """
+
+        x = self._as_vector(x)
+        bounds = self._get_bounds(x)
+
+        for value, (lo, hi) in zip(x, bounds):
+            width = hi - lo
+            edge = self.boundary_eig_frac * width
+
+            if value <= lo + edge:
+                return True
+
+            if value >= hi - edge:
+                return True
+
+        return False
+
     def _acquisition_objective(self, c, acquisition):
         """
         Objective passed to scipy.optimize.minimize().
 
-        SciPy minimizes, so EI is negated because EI should be maximized.
+        SciPy minimizes, so EI/EIG are negated because they should be maximized.
+
+        acquisition="ei_eig":
+            Use Expected Improvement in the interior.
+            Use Expected Information Gain near the bounds.
         """
 
         if acquisition == "mean":
@@ -275,7 +349,13 @@ class Surrogate:
         if acquisition == "ei":
             return -self.expected_improvement(c)
 
-        raise ValueError("acquisition must be 'mean' or 'ei'")
+        if acquisition == "ei_eig":
+            if self.is_near_bounds(c):
+                return -self.expected_information_gain(c)
+
+            return -self.expected_improvement(c)
+
+        raise ValueError("acquisition must be 'mean', 'ei', or 'ei_eig'")
 
     def _fit(self):
         X = np.vstack(self.X)
@@ -1024,6 +1104,8 @@ class Surrogate:
             theta0=self.theta0,
             corr=self.corr,
             print_global=False,
+            eval_noise=True,
+            hyper_opt="Cobyla",
         )
 
         model.set_training_values(X_unique, Y_unique.reshape(-1, 1))
