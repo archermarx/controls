@@ -123,7 +123,8 @@ def main(args):
 
     base_setpoint = read_setpoint(args.setpoint)
 
-    np.random.seed(1234)
+    #np.random.seed(1234)
+    np.random.seed(4321)
     initial_controls = [setpoint_to_vector(base_setpoint, control_vars)]
     initial_controls += [np.array([np.random.uniform(lb, ub) for (lb, ub) in bounds]) for _ in range(dim)]
     print(f"{initial_controls=}")
@@ -168,11 +169,15 @@ def main(args):
     log = []
     should_exit=False
 
+    best_setpoint = None
+    best_metric = np.inf
+    max_no_improvement = 5
+    no_improvement_timer = 0
+
     with labview.LabViewClient(host=args.host_ip, port=args.port) as client:
         for step in range(args.num_steps):
             if step < dim+1:
                 c_current = initial_controls[step]
-                point_source = "initial_setpoint" if step == 0 else "initial_perturbation"
                 z_pred = np.nan
 
             else:
@@ -188,7 +193,6 @@ def main(args):
                 )
 
                 c_current = clip_to_bounds(c_current, bounds)
-                point_source = "surrogate"
 
             setpoint = vector_to_setpoint(
                 base_setpoint,
@@ -198,7 +202,6 @@ def main(args):
 
             print()
             print(f"Step {step + 1}/{args.num_steps}")
-            print(f"Point source: {point_source}")
             print(f"Commanding: {setpoint}")
             if args.interactive:
                 while True:
@@ -222,6 +225,13 @@ def main(args):
             )
 
             z_actual = metric_fn(data)
+            if z_actual < best_metric:
+                best_setpoint = setpoint
+                best_metric = z_actual
+                no_improvement_timer = 0
+            else:
+                no_improvement_timer += 1
+                print(f"No improvement on best. Timer = {no_improvement_timer}/{max_no_improvement}")
 
             mean_current = data["dmm"].current
             rms_pct = rms_amplitude_pct(data)
@@ -246,7 +256,6 @@ def main(args):
             sample = {
                 "step": step + 1,
                 "status": "ok",
-                "point_source": point_source,
                 "z_actual": z_actual,
                 "z_pred": z_pred,
                 "control_vars": control_vars,
@@ -268,15 +277,18 @@ def main(args):
             with open(log_file, "wb") as fd:
                 pickle.dump(log, fd)
 
-            print(f"z = {z_actual:.6g}")
+            print(f"z = {z_actual:.6g} (best = {best_metric:.6g})")
             print(f"Surrogate trained: {surrogate.is_trained}")
             print(f"Number of surrogate points: {len(surrogate.Y)}")
             print(f"Saved: {out_file}")
 
-        if args.reset_at_end:
+        if args.reset_at_end or best_setpoint is None:
             print()
             print("Resetting to base setpoint.")
             controller.control_to(base_setpoint, client)
+        else:
+            print(f"Setting to optimum: {best_setpoint}\n(metric = {best_metric:.6g})")
+            controller.control_to(best_setpoint, client)
 
     print()
     print("Done.")
