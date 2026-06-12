@@ -1,20 +1,11 @@
+import numpy as np
+
 import lib.labview as labview
+import lib.controls as controls
 
-with labview.LabViewClient() as client:
-    config = labview.ThrustStandConfig(
-        num_points = 10,
-        gains = labview.PIDGain(
-            Kp = 0.01,
-            Ki = 0.1,
-            Kd = 0.0,
-        )
-    )
+controller = controls.ThrusterController("h9_calibration.json", "Kr")
+num_avg_points = 50
 
-    labview.set_thruststand_config(client, config)
-
-    while response.casefold() != "y":
-        response = input("Continue to readings? (y/n): ")
-    
-    readings = labview.get_thruststand_readings(client)
-    for attr in dir(labview.ThrustStandReadings):
-        print(f"{attr}: {getattr(readings, attr)}")
+with labview.LabViewClient(timeout=num_avg_points) as client:
+    thrust = controller.take_thrust(client, num_avg_pts=num_avg_points)
+    print(f"{thrust=:.3f}")

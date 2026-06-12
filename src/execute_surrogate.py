@@ -9,16 +9,6 @@ import matplotlib.pyplot as plt
 import lib.controls as controls
 import lib.labview as labview
 from lib.surrogate import Surrogate
-from lib.metrics import make_metric
-
-INITIAL_CONTROL_MULTIPLIERS = np.array(
-    [
-        [1.00],  # original setpoint
-        [1.20],  # +5%
-        [0.80],  # -5%
-    ],
-    dtype=float,
-)
 
 parser = argparse.ArgumentParser()
 
@@ -47,6 +37,8 @@ parser.add_argument("--output", "-o", type=Path, default=Path("."))
 parser.add_argument("--prefix", "-p", type=str, default="surrogate")
 parser.add_argument("--reset-at-end", action="store_true")
 parser.add_argument("--interactive", action="store_true")
+
+parser.add_argument("--remote-dir", type=Path)
 
 def compute_rms_amplitude_master(data):
     dmm: labview.KeysightDMMReadings = data["dmm"]
@@ -125,32 +117,31 @@ def main(args):
 
     dim = len(control_vars)
 
-    if INITIAL_CONTROL_MULTIPLIERS.shape[1] != dim:
-        raise ValueError(
-            "INITIAL_CONTROL_MULTIPLIERS must have one column per control variable. "
-            f"You gave {dim} control variables, but the hard-coded initial points have "
-            f"{INITIAL_CONTROL_MULTIPLIERS.shape[1]} columns."
-        )
-
-    num_initial_points = INITIAL_CONTROL_MULTIPLIERS.shape[0]
 
     output_dir = Path(args.output)
     os.makedirs(output_dir, exist_ok=True)
 
     base_setpoint = read_setpoint(args.setpoint)
 
+    np.random.seed(1234)
+    initial_controls = [setpoint_to_vector(base_setpoint, control_vars)]
+    initial_controls += [np.array([np.random.uniform(lb, ub) for (lb, ub) in bounds]) for _ in range(dim)]
+    print(f"{initial_controls=}")
+
     metric_fn = rms_amplitude_pct
 
     surrogate = Surrogate(
         dim=dim,
         bounds=bounds,
-        min_points=num_initial_points,
+        min_points=dim+1,
         optimize_restarts=args.optimize_restarts,
         acquisition=args.acquisition,
         seed=args.seed,
     )
 
-    controller = controls.ThrusterController(args.cal_file, propellant=args.gas, verbose=args.verbose)
+    controller = controls.ThrusterController(
+        args.cal_file, propellant=args.gas, verbose=args.verbose
+    )
 
     c_initial_raw = setpoint_to_vector(base_setpoint, control_vars)
     c_initial = clip_to_bounds(c_initial_raw, bounds)
@@ -160,21 +151,12 @@ def main(args):
         print(f"Raw initial control:     {c_initial_raw}")
         print(f"Clipped initial control: {c_initial}")
 
-    initial_controls = []
-
-    for multiplier_row in INITIAL_CONTROL_MULTIPLIERS:
-        c = c_initial * multiplier_row
-        c = clip_to_bounds(c, bounds)
-        initial_controls.append(c)
-
-    initial_controls = np.asarray(initial_controls, dtype=float)
 
     print("Starting surrogate control.")
     print(f"Control variables: {control_vars}")
     print(f"Bounds: {bounds}")
     print(f"Data sources: {args.data}")
     print(f"Steps: {args.num_steps}")
-    print(f"Hard-coded initial points: {num_initial_points}")
     print()
 
     print("Initial control vectors:")
@@ -188,7 +170,7 @@ def main(args):
 
     with labview.LabViewClient(host=args.host_ip, port=args.port) as client:
         for step in range(args.num_steps):
-            if step < num_initial_points:
+            if step < dim+1:
                 c_current = initial_controls[step]
                 point_source = "initial_setpoint" if step == 0 else "initial_perturbation"
                 z_pred = np.nan
@@ -248,17 +230,18 @@ def main(args):
 
             surrogate.update(c_current, z_actual)
             if surrogate.is_trained:
-                fig, axs = plt.subplots(2,1, layout='constrained', figsize=(6,6))
-                surrogate.plot_1d_on_axis(axs[1])
+                if dim == 1:
+                    fig, axs = plt.subplots(2,1, layout='constrained', figsize=(6,6))
+                    surrogate.plot_1d_on_axis(axs[1])
 
-                lb, ub = bounds[0]
-                x = np.linspace(lb, ub, 100)
-                ei = [surrogate.expected_improvement([_x]) for _x in x]
-                axs[0].plot(x, ei, color = 'red')
-                axs[0].set(title="Expected improvement", xticklabels = [], xlim=(lb, ub))
+                    lb, ub = bounds[0]
+                    x = np.linspace(lb, ub, 100)
+                    ei = [surrogate.expected_improvement([_x]) for _x in x]
+                    axs[0].plot(x, ei, color = 'red')
+                    axs[0].set(title="Expected improvement", xticklabels = [], xlim=(lb, ub))
 
-                fig.savefig("surrogate.png")
-                plt.close(fig)
+                    fig.savefig("surrogate.png")
+                    plt.close(fig)
 
             sample = {
                 "step": step + 1,

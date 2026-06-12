@@ -5,6 +5,8 @@ from pydantic import BaseModel, ValidationError
 from pathlib import Path
 import json
 
+import numpy as np
+
 import lib.labview as labview
 from lib.labview import LabViewClient, MagnaControl, AlicatControl, LambdaControl, \
                     DeviceCommands
@@ -69,7 +71,6 @@ def apply_limits(val, range):
         raise ValueError(f"Value {val} exceeded range of {range}")
     return val
 
-
 class ThrusterController:
     def __init__(
             self, cal_file: str | Path, 
@@ -82,8 +83,10 @@ class ThrusterController:
         self.verbose = verbose
         self.propellant = propellant
 
+        self.cal_file = cal_file
+
         # Read calibration file
-        with open(cal_file, "rb") as fd:
+        with open(self.cal_file, "rb") as fd:
             cal_dict = json.load(fd)
 
         self.cal = cal_dict["calibration"]
@@ -174,6 +177,33 @@ class ThrusterController:
             labview.set_lambda_control(client, lambda_control, self.verbose)
             
         return DeviceCommands(magna_control, alicat_control, lambda_control)
+
+    def take_thrust(self, client, num_avg_pts=10, reset_calibration=False):
+        config = labview.ThrustStandConfig(
+            num_points = num_avg_pts,
+            gains = labview.PIDGain(
+                self.cal["thrust_stand"]["Kp"],
+                self.cal["thrust_stand"]["Ki"],
+                self.cal["thrust_stand"]["Kd"],
+            )
+        )
+
+        labview.set_thruststand_config(client, config)
+        readings = labview.get_thruststand_readings(client)
+        shunt = np.mean(readings.shunt)
+
+        if reset_calibration:
+            self.cal["thrust_stand"]["shunt_at_setpoint"] = shunt
+            with open(self.cal_file, "w") as fd:
+                print("Updated calibration")
+                json.dump({"magnet_currents_A": self.magnet_currents, "calibration": self.cal}, fd, indent=4)
+
+        cal = self.cal["thrust_stand"]
+        s_mean = np.mean(shunt)
+        s0 = cal["shunt_at_setpoint"]
+        m = cal["slope"]
+        b = cal["intercept"]
+        return m * (s_mean - s0) + b
 
     def take_data(self, client: LabViewClient, delay: int = 0, sources: list[str] | None = None):
         assert self.setpoint is not None

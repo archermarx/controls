@@ -39,10 +39,10 @@ CMD_OSCOPE_GET_READINGS = 0x2B                      # Command 43
                                                     
 CMD_DMM_GET_READINGS = 0x31                         # Command 49
 
-# TODO: fix these
-CMD_THRUSTSTAND_GET_READINGS = 57                     
+CMD_THRUSTSTAND_FETCH = 56
+CMD_THRUSTSTAND_SET_COMMUNICATION = 57
 CMD_THRUSTSTAND_SET_CONFIG = 58                
-
+CMD_THRUSTSTAND_GET_READINGS = 59
 
 # ---------------------------------------------------------------------------
 
@@ -585,13 +585,15 @@ class LabViewClient:
     def __init__(self,
                  host: str = LABVIEW_IP,
                  port: int = LABVIEW_PORT,
-                 timeout: float = SOCKET_TIMEOUT
+                 timeout: float = SOCKET_TIMEOUT,
+                 dummy: bool = False,
                 ):
         
         self.host = host
         self.port = port
         self.timeout = timeout
         self.socket: socket.socket | None = None
+        self.dummy = dummy
 
     def connect(self) -> None:
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -608,11 +610,13 @@ class LabViewClient:
             self.socket = None
 
     def __enter__(self) -> "LabViewClient":
-        self.connect()
+        if not self.dummy:
+            self.connect()
         return self
 
     def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
-        self.close()
+        if not self.dummy:
+            self.close()
 
     def send_packet(self, command_id: int, payload: bytes = b"") -> None:
         if self.socket is None:
