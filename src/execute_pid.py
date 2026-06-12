@@ -13,6 +13,7 @@ from lib.pid import PIDState, pid_mass_flow_step
 parser = argparse.ArgumentParser()
 
 parser.add_argument("--target-current", "-i", type=float, required=True, help="Target discharge current [A]")
+parser.add_argument("--cal-file", "-c", type=Path, help="The path to the thruster calibration file")
 parser.add_argument("--nominal-flow", "-f", type=float, required=True, help="Nominal anode flow setpoint")
 parser.add_argument("--min-flow", type=float, required=True, help="Minimum allowed anode flow setpoint")
 parser.add_argument("--max-flow", type=float, required=True, help="Maximum allowed anode flow setpoint")
@@ -46,11 +47,11 @@ def main(args):
     pid_state = PIDState()
     data_log = []
 
-    controller = controls.ThrusterController("Kr")
+    controller = controls.ThrusterController(args.cal_file, "Kr")
 
     with open(args.setpoint, "rb") as fd:
         setpoint = controls.ControlPoint.model_validate_json(fd.read())
-    setpoint.anode_flow_rate_kg_s = args.nominal_flow / 1e6 # convert mg/s to kg/s
+    setpoint.anode_mass_flow_rate_kg_s = args.nominal_flow / 1e6 # convert mg/s to kg/s
 
     print("Starting PID mass-flow control.")
     print(f"Target current: {args.target_current} A")
@@ -103,7 +104,7 @@ def main(args):
         controller.control_to(setpoint, client, set_lambdas=False, set_magna=False)
         settle_start_time = time.monotonic()
         flow_times.append(settle_start_time - start_time)
-        flow_rates.append(setpoint.anode_flow_rate_kg_s * 1e6)
+        flow_rates.append(setpoint.anode_mass_flow_rate_kg_s * 1e6)
         measure_current_for_interval(
             settle_time_s,
             interval=current_measurement_interval_s,
@@ -112,14 +113,15 @@ def main(args):
         )
 
         while True:
-            print(f"Commanding to {setpoint.anode_flow_rate_kg_s}")
+            mdot_a = setpoint.anode_mass_flow_rate_kg_s
+            print(f"Commanding to {mdot_a}")
 
-            assert setpoint.anode_flow_rate_kg_s >= args.min_flow / 1e6
-            assert setpoint.anode_flow_rate_kg_s <= args.max_flow / 1e6
+            assert mdot_a >= args.min_flow / 1e6
+            assert mdot_a <= args.max_flow / 1e6
 
             loop_start_time = time.monotonic()
             controller.control_to(setpoint, client)
-            flow_rates.append(setpoint.anode_flow_rate_kg_s * 1e6)
+            flow_rates.append(mdot_a * 1e6)
             flow_times.append(loop_start_time - settle_start_time)
 
             elapsed_time = loop_start_time - start_time
@@ -141,7 +143,7 @@ def main(args):
             anode_flow_command = pid_mass_flow_step(
                 target_current=args.target_current,
                 measured_current=measured_current,
-                nominal_flow=setpoint.anode_flow_rate_kg_s*1e6,
+                nominal_flow=mdot_a*1e6,
                 dt=dt, #args.sample_time,
                 state=pid_state,
                 kp=args.kp,
@@ -152,8 +154,8 @@ def main(args):
             ) / 1e6
 
             # Send new anode flow setpoint
-            old_anode_flow = setpoint.anode_flow_rate_kg_s
-            setpoint.anode_flow_rate_kg_s = anode_flow_command
+            old_anode_flow = mdot_a
+            setpoint.anode_mass_flow_rate_kg_s = anode_flow_command
 
             # Log
             error = args.target_current - measured_current

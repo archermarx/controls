@@ -13,6 +13,7 @@ from lib.labview import LabViewClient
 logger = logging.getLogger(__name__)
 parser = argparse.ArgumentParser()
 parser.add_argument("file", type=Path, help="The path to the command file to monitor")
+parser.add_argument("--cal-file", "-c", type=Path, help="The path to the thruster calibration file")
 parser.add_argument("--host-ip", type=str, default=labview.LABVIEW_IP, help="The IP address of the LabVIEW client")
 parser.add_argument("--port", type=int, default=labview.LABVIEW_PORT, help="The port of the LabVIEW client")
 parser.add_argument("--sleep-interval", type=float, default=0.25, help="How often, in seconds, to check for modifications to the command file")
@@ -61,7 +62,7 @@ if __name__ == "__main__":
 
     logger.info(f"{counter=}, {last_modified=}")
 
-    controller = controls.ThrusterController("Kr", verbose=False)
+    controller = controls.ThrusterController(args.cal_file, propellant = "Kr", verbose=False)
 
     with LabViewClient(host=args.host_ip, port=args.port) as client:
         while True:

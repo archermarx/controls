@@ -10,16 +10,11 @@ import matplotlib.pyplot as plt
 
 parser = argparse.ArgumentParser()
 parser.add_argument("dir", type=str, help="Directory in which data files are stored")
-parser.add_argument("--setpoint", "-s", type=str, required=True, help="Setpoint file, used to read normalization info")
-parser.add_argument("--output-dir", "-o", type=str, help="Inner coil current, used for plotting b-field")
+parser.add_argument("--output-dir", "-o", type=str, help="Output directory")
 
 args = parser.parse_args()
 dir = args.dir
 
-with open(args.setpoint, "rb") as fd:
-    setpoint = controls.ControlPoint.model_validate_json(fd.read())
-
-inner_coil_current = setpoint.magnet_current_inner_A
 output_dir = args.output_dir if args.output_dir else dir
 
 fig, ax = plt.subplots(1,1)
@@ -41,7 +36,8 @@ for file in os.listdir(dir):
         contents = pickle.load(fd)
 
     oscope: labview.OscopeReadings = contents["data"]["oscope"]["Anode Current"]
-    controls = contents["controls"]
+
+    setpoint = contents["controls"]
     rms = oscope.rms
     average = oscope.average
     peak_to_peak = oscope.peak_to_peak
@@ -53,18 +49,17 @@ for file in os.listdir(dir):
     print(f"Peak to peak (oscope): {peak_to_peak} A")
 
     if peak_to_peak > 1e3:
-        print(f"Oscope clipped for {controls}. Skipping.\n")
+        print(f"Oscope clipped for {setpoint}. Skipping.\n")
         continue
 
     if len(oscope.waveform.data) == 0:
-        print(f"Warning: no oscillation data collected for {controls}. Skipping.\n")
+        print(f"Warning: no oscillation data collected for {setpoint}. Skipping.\n")
         continue
 
-    bfield_inner = contents["controls"]["magnet_current_inner_A"]
-    bfield_percent = bfield_inner / inner_coil_current
-    voltage = contents["controls"]["discharge_voltage_V"]
-    anode_flow = contents["controls"]["anode_flow_rate_kg_s"]
-    cff = contents["controls"]["cathode_flow_fraction"]
+    bfield_percent = setpoint["magnetic_field_scale"]
+    voltage = setpoint["discharge_voltage_v"]
+    anode_flow = setpoint["anode_mass_flow_rate_kg_s"]
+    cff = setpoint["cathode_flow_fraction"]
     voltages.append(voltage)
     mdots.append(anode_flow)
     cffs.append(cff)

@@ -12,6 +12,7 @@ import lib.labview as labview
 
 parser = argparse.ArgumentParser()
 parser.add_argument("test_matrix", type=Path, help="CSV file containing test points")
+parser.add_argument("--cal-file", "-c", type=Path, help="The path to the thruster calibration file")
 parser.add_argument("--data", "-d", type=lambda s: s.split(","), help="Comma-separated list of data types to collect. Choices are 'magna', 'alicat', 'lambda', 'dmm', and 'oscope'. Defaults to writing all.")
 parser.add_argument("--output", "-o", type=Path, default=Path("."), help="Folder in which data will be written. Will be created if it does not already exist.")
 parser.add_argument("--prefix", "-p", type=str, default="data", help="Prefix to append to data files.")
@@ -49,8 +50,6 @@ def compute_rms_amplitude(data):
 def main(args):
     with open(args.setpoint, "rb") as fd:
         base_setpoint = controls.ControlPoint.model_validate_json(fd.read())
-    inner_coil_current = base_setpoint.magnet_current_inner_A
-    outer_coil_current = base_setpoint.magnet_current_outer_A
     
     prefix = "" if not args.prefix else args.prefix + "_"
     data_types = ["magna", "dmm", "alicat", "lambda", "oscope"] if args.data is None else args.data
@@ -61,7 +60,7 @@ def main(args):
     cathode_flow_fractions = matrix["cathode_flow_fraction"]
     magnetic_field_strengths = matrix["magnetic_field_scale"]
 
-    controller = controls.ThrusterController(args.gas, args.verbose)
+    controller = controls.ThrusterController(args.cal_file, propellant=args.gas, verbose=args.verbose)
     output_dir = Path(args.output)
     os.makedirs(output_dir, exist_ok=True)
 
@@ -73,13 +72,12 @@ def main(args):
 
     with labview.LabViewClient(host=args.host_ip, port=args.port) as client:
         for (i, (mdot, vd, cff, bmag)) in enumerate(zip(flow_rates, discharge_voltages, cathode_flow_fractions, magnetic_field_strengths)):
-
+            
             setpoint = controls.ControlPoint(
-                anode_flow_rate_kg_s=mdot,
-                discharge_voltage_V=vd,
+                anode_mass_flow_rate_kg_s=mdot,
+                discharge_voltage_v=vd,
                 cathode_flow_fraction=cff,
-                magnet_current_inner_A=bmag*inner_coil_current,
-                magnet_current_outer_A=bmag*outer_coil_current,
+                magnetic_field_scale=bmag
             )
 
             if i == 0:

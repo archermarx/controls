@@ -69,9 +69,9 @@ def main():
     for file in history_files:
         with open(file, "rb") as fd:
             contents = pickle.load(fd)
-            xs.append(contents["control_vector"])
-            ys.append(contents["z_actual"])
-            trained.append(contents["surrogate_trained"])
+        xs.append(contents["control_vector"])
+        ys.append(contents["z_actual"])
+        trained.append(contents["surrogate_trained"])
 
     # Plot each frame as a png image
     image_paths = []

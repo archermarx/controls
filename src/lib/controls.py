@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import time
 from pydantic import BaseModel, ValidationError
+from pathlib import Path
+import json
 
 import lib.labview as labview
 from lib.labview import LabViewClient, MagnaControl, AlicatControl, LambdaControl, \
@@ -27,11 +29,10 @@ class ControlMetadata(BaseModel):
     counter: int = 0
 
 class ControlPoint(BaseModel):
-    anode_flow_rate_kg_s: float
+    anode_mass_flow_rate_kg_s: float
     cathode_flow_fraction: float
-    discharge_voltage_V: float
-    magnet_current_inner_A: float
-    magnet_current_outer_A: float
+    discharge_voltage_v: float
+    magnetic_field_scale: float
 
 class ControlFile(BaseModel):
     metadata: ControlMetadata
@@ -68,9 +69,11 @@ def apply_limits(val, range):
         raise ValueError(f"Value {val} exceeded range of {range}")
     return val
 
+
 class ThrusterController:
     def __init__(
-            self, propellant: str = "Kr",
+            self, cal_file: str | Path, 
+            propellant: str = "Kr",
             verbose: bool = False,
             voltage_range: tuple[float, float] = (200, 800),
             flow_range: tuple[float, float] = (100, 800),
@@ -79,18 +82,18 @@ class ThrusterController:
         self.verbose = verbose
         self.propellant = propellant
 
-        # Calibration factors: (slope, intercept)
-        self.voltage_cal      = (1.01888,  0.544818)
-        self.inner_magnet_cal = (1.00808, -0.002797)
-        self.outer_magnet_cal = (1.00483, -0.013443)
-        self.anode_flow_cal   = (1.002283, 0.554064)
-        self.cathode_flow_cal = (1.0, 0.0)
+        # Read calibration file
+        with open(cal_file, "rb") as fd:
+            cal_dict = json.load(fd)
+
+        self.cal = cal_dict["calibration"]
+        self.magnet_currents = cal_dict["magnet_currents_A"]
 
         # Limits
         self.voltage_range = voltage_range
         self.flow_range = flow_range
         self.cathode_flow_range = (0.05 * flow_range[0], 0.1 * flow_range[1])
-
+    
     def control_to(
             self,
             setpoint: ControlPoint,
@@ -101,7 +104,7 @@ class ThrusterController:
             ):
         self.setpoint = setpoint
 
-        anode_flow_rate_mg_s = setpoint.anode_flow_rate_kg_s * 1e6
+        anode_flow_rate_mg_s = setpoint.anode_mass_flow_rate_kg_s * 1e6
         anode_flow_rate_sccm = anode_flow_rate_mg_s * MGS_TO_SCCM[self.propellant]
         cathode_flow_rate_sccm = anode_flow_rate_sccm * setpoint.cathode_flow_fraction
 
@@ -117,7 +120,7 @@ class ThrusterController:
         # Set the power supply
         magna_control = MagnaControl(
             voltage_limit=apply_limits(
-                calibrate(setpoint.discharge_voltage_V, self.voltage_cal),
+                calibrate(setpoint.discharge_voltage_v, self.cal["voltage"]),
                 self.voltage_range
             ),
             overcurrent_trip=75,
@@ -130,7 +133,7 @@ class ThrusterController:
         anode_flow_control = AlicatControl(
             label="anode",
             setpoint=apply_limits(
-                calibrate(anode_flow_rate_sccm, self.anode_flow_cal),
+                calibrate(anode_flow_rate_sccm, self.cal["anode_flow"]),
                 self.flow_range
             ),
             units="sccm"
@@ -138,7 +141,7 @@ class ThrusterController:
         cathode_flow_control = AlicatControl(
             label="cathode",
             setpoint=apply_limits(
-                calibrate(cathode_flow_rate_sccm, self.cathode_flow_cal),
+                calibrate(cathode_flow_rate_sccm, self.cal["cathode_flow"]),
                 self.cathode_flow_range,
             ),
             units="sccm"
@@ -150,15 +153,14 @@ class ThrusterController:
         lambda_control = [
             LambdaControl(
                 label=label,
-                current_limit=calibrate(current, cal),
+                current_limit=calibrate(setpoint.magnetic_field_scale * self.magnet_currents[label], cal),
                 voltage_limit=VOLTAGE_LIMIT,
                 overvoltage_protection=VOLTAGE_LIMIT,
                 enable=True
             )
-            for label, current, cal in zip(
+            for label, cal in zip(
                 ["inner", "outer"],
-                [setpoint.magnet_current_inner_A, setpoint.magnet_current_outer_A],
-                [self.inner_magnet_cal, self.outer_magnet_cal],
+                [self.cal["inner_magnet"], self.cal["outer_magnet"]],
             )
         ]
 
@@ -189,7 +191,7 @@ class ThrusterController:
             variable_settings = {
                 "Anode Current": dict(offset=self.current_limit/2, range=self.current_limit),
                 "Cathode Current": dict(offset=self.current_limit/2, range=self.current_limit),
-                "Discharge Voltage": dict(offset=self.setpoint.discharge_voltage_V, range=250),
+                "Discharge Voltage": dict(offset=self.setpoint.discharge_voltage_v, range=250),
                 "C2G Voltage": dict(offset=-18, range=40),
             }
             init_configs = [

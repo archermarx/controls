@@ -22,19 +22,11 @@ INITIAL_CONTROL_MULTIPLIERS = np.array(
 
 parser = argparse.ArgumentParser()
 
+parser.add_argument("--cal-file", "-c", type=Path, help="The path to the thruster calibration file")
 parser.add_argument("--setpoint", "-s", type=Path, required=True)
 parser.add_argument("--control-vars", type=str, required=True)
 parser.add_argument("--bounds", type=str, required=True)
-
-parser.add_argument("--target-current", type=float, default=None)
-
-parser.add_argument(
-    "--data",
-    "-d",
-    type=lambda s: [item.strip() for item in s.split(",") if item.strip()],
-    default=["dmm", "oscope"],
-)
-
+parser.add_argument("--data", "-d", type=lambda s: [item.strip() for item in s.split(",") if item.strip()], default=["dmm", "oscope"],)
 parser.add_argument("--num-steps", "-n", type=int, default=25)
 parser.add_argument("--dwell-time", "-t", type=int, default=5)
 parser.add_argument("--gas", "-g", type=str, choices=["Xe", "Kr", "Ar"], default="Kr")
@@ -78,7 +70,6 @@ def rms_amplitude_pct(data, *args, **kwargs):
 def parse_control_vars(text):
     return [x.strip() for x in text.split(",") if x.strip()]
 
-
 def parse_bounds(text):
     bounds = []
 
@@ -109,11 +100,9 @@ def clip_to_bounds(c, bounds):
         dtype=float,
     )
 
-
 def read_setpoint(path):
     with open(path, "rb") as fd:
         return controls.ControlPoint.model_validate_json(fd.read())
-
 
 def setpoint_to_vector(setpoint, control_vars):
     return np.array(
@@ -121,15 +110,11 @@ def setpoint_to_vector(setpoint, control_vars):
         dtype=float,
     )
 
-
 def vector_to_setpoint(base_setpoint, control_vars, c):
     setpoint = base_setpoint.model_copy(deep=True)
-
     for name, value in zip(control_vars, c):
         setattr(setpoint, name, float(value))
-
     return setpoint
-
 
 def main(args):
     control_vars = parse_control_vars(args.control_vars)
@@ -165,7 +150,7 @@ def main(args):
         seed=args.seed,
     )
 
-    controller = controls.ThrusterController(args.gas, args.verbose)
+    controller = controls.ThrusterController(args.cal_file, propellant=args.gas, verbose=args.verbose)
 
     c_initial_raw = setpoint_to_vector(base_setpoint, control_vars)
     c_initial = clip_to_bounds(c_initial_raw, bounds)
