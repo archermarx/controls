@@ -189,7 +189,7 @@ def main(args):
     max_no_improvement = 10
     no_improvement_timer = 0
 
-    with labview.LabViewClient(host=args.host_ip, port=args.port, timeout=30) as client:
+    with labview.LabViewClient(host=args.host_ip, port=args.port, timeout=60) as client:
         for step in range(args.num_steps):
             if step < dim+1:
                 c_current = initial_controls[step]
@@ -247,7 +247,7 @@ def main(args):
             elif surrogate.is_trained:
                 no_improvement_timer += 1
                 print(f"No improvement on best. Timer = {no_improvement_timer}/{max_no_improvement}")
-                if no_improvement_timer > max_no_improvement:
+                if no_improvement_timer >= max_no_improvement:
                     break
 
             mean_current = data["dmm"]["current"]
