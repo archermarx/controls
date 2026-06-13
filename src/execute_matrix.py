@@ -35,12 +35,12 @@ def num_digits(n):
     return digits
 
 def compute_rms_amplitude(data):
-    dmm: labview.KeysightDMMReadings = data["dmm"]
+    dmm: dict = data["dmm"]
     anode_current: labview.OscopeReadings = data["oscope"]["Anode Current"]
 
     time, current = anode_current.waveform.time_values(), anode_current.waveform.y_values()
     mean_oscope = np.mean(current)
-    mean_dmm = dmm.current
+    mean_dmm = dmm["current"]
     current_rescaled = current - mean_oscope + mean_dmm
 
     # centered rms = sqrt(mean((I - I_mean)^2))
@@ -88,7 +88,7 @@ def main(args):
             data = controller.take_data(client, delay=args.dwell_time, sources=data_types)
 
             if "dmm" in data_types and "oscope" in data_types:
-                avg_current = data["dmm"].current
+                avg_current = data["dmm"]["current"]
                 p2p_current = data["oscope"]["Anode Current"].peak_to_peak
                 print(f"Average current: {avg_current:.3f} A (p2p = {p2p_current:.3f})")
 

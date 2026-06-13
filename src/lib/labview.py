@@ -133,6 +133,8 @@ class LambdaControl:
 @dataclass
 class KeysightDMMReadings:
     current: float
+    def to_dict(self):
+        return {"current": self.current}
 
 @dataclass
 class OscopeAxis:

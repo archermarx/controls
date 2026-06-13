@@ -68,7 +68,7 @@ def main(args):
     loop_start_time = start_time
 
     def measure_current(client):
-        return labview.get_dmm_readings(client).current
+        return labview.get_dmm_readings(client).to_dict()["current"]
 
     flow_times = []
     current_times = []

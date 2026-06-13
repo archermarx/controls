@@ -35,6 +35,7 @@ class ControlPoint(BaseModel):
     cathode_flow_fraction: float
     discharge_voltage_v: float
     magnetic_field_scale: float
+    magnetic_field_scale_outer: float | None = None
 
 class ControlFile(BaseModel):
     metadata: ControlMetadata
@@ -153,19 +154,27 @@ class ThrusterController:
 
         # Set the magnet power supplies
         VOLTAGE_LIMIT=float('inf')
-        lambda_control = [
-            LambdaControl(
-                label=label,
-                current_limit=calibrate(setpoint.magnetic_field_scale * self.magnet_currents[label], cal),
-                voltage_limit=VOLTAGE_LIMIT,
-                overvoltage_protection=VOLTAGE_LIMIT,
-                enable=True
-            )
-            for label, cal in zip(
-                ["inner", "outer"],
-                [self.cal["inner_magnet"], self.cal["outer_magnet"]],
-            )
-        ]
+        inner_scale = setpoint.magnetic_field_scale
+        if setpoint.magnetic_field_scale_outer is None:
+            outer_scale = inner_scale
+        else:
+            outer_scale = setpoint.magnetic_field_scale_outer
+
+        inner_magnet = LambdaControl(
+            label="inner",
+            current_limit=calibrate(inner_scale * self.magnet_currents["inner"], self.cal["inner_magnet"]),
+            voltage_limit=VOLTAGE_LIMIT,
+            overvoltage_protection=VOLTAGE_LIMIT,
+            enable=True
+        )
+        outer_magnet = LambdaControl(
+            label="outer",
+            current_limit=calibrate(outer_scale * self.magnet_currents["outer"], self.cal["outer_magnet"]),
+            voltage_limit=VOLTAGE_LIMIT,
+            overvoltage_protection=VOLTAGE_LIMIT,
+            enable=True
+        )
+        lambda_control = [inner_magnet, outer_magnet]
 
         if set_magna:
             labview.set_magna_control(client, magna_control, self.verbose)
@@ -240,10 +249,8 @@ class ThrusterController:
         print("\nTaking data...")
 
         out = {}
-        if "thruststand" in data_sources:
-            out["thruststand"] = labview.get_thruststand_readings(client)
         if "dmm" in data_sources:
-            out["dmm"] = labview.get_dmm_readings(client)
+            out["dmm"] = labview.get_dmm_readings(client).to_dict()
         if "magna" in data_sources:
             out["magna"] = labview.get_magna_readings(client)
         if "alicat" in data_sources:
@@ -252,6 +259,8 @@ class ThrusterController:
         if "lambda" in data_sources:
             lambda_readings = labview.get_lambda_readings(client)
             out["lambda"] = {r.label: r for r in lambda_readings}
+        if "thruststand" in data_sources:
+            out["thrust"] = self.take_thrust(client, num_avg_pts = 20)
         if "oscope" in data_sources:
             max_attempts = 3
             for attempt in range(max_attempts):

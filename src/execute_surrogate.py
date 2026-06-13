@@ -16,7 +16,7 @@ parser.add_argument("--cal-file", "-c", type=Path, help="The path to the thruste
 parser.add_argument("--setpoint", "-s", type=Path, required=True)
 parser.add_argument("--control-vars", type=str, required=True)
 parser.add_argument("--bounds", type=str, required=True)
-parser.add_argument("--data", "-d", type=lambda s: [item.strip() for item in s.split(",") if item.strip()], default=["dmm", "oscope"],)
+parser.add_argument("--data", "-d", type=lambda s: [item.strip() for item in s.split(",") if item.strip()], default=None)
 parser.add_argument("--num-steps", "-n", type=int, default=25)
 parser.add_argument("--dwell-time", "-t", type=int, default=5)
 parser.add_argument("--gas", "-g", type=str, choices=["Xe", "Kr", "Ar"], default="Kr")
@@ -37,27 +37,40 @@ parser.add_argument("--output", "-o", type=Path, default=Path("."))
 parser.add_argument("--prefix", "-p", type=str, default="surrogate")
 parser.add_argument("--reset-at-end", action="store_true")
 parser.add_argument("--interactive", action="store_true")
+parser.add_argument("--objective", type=str, default="rms")
 
 parser.add_argument("--remote-dir", type=Path)
 
-def compute_rms_amplitude_master(data):
-    dmm: labview.KeysightDMMReadings = data["dmm"]
+def compute_rms_amplitude_master(data, setpoint):
+    dmm = data["dmm"]
     anode_current: labview.OscopeReadings = data["oscope"]["Anode Current"]
 
     time, current = anode_current.waveform.time_values(), anode_current.waveform.y_values()
     mean_oscope = np.mean(current)
-    mean_dmm = dmm.current
+    mean_dmm = dmm["current"]
     current_centered = current - mean_oscope
 
     # centered rms = sqrt(mean((I - I_mean)^2))
     rms_current = np.sqrt(np.mean((current_centered)**2))
     return rms_current, rms_current/mean_dmm
 
-def rms_amplitude_raw(data, *args, **kwargs):
-    return compute_rms_amplitude_master(data)[0]
+def rms_amplitude_raw(data, setpoint, *args, **kwargs):
+    return compute_rms_amplitude_master(data, setpoint)[0]
 
-def rms_amplitude_pct(data, *args, **kwargs):
-    return compute_rms_amplitude_master(data)[1]
+def rms_amplitude_pct(data, setpoint, *args, **kwargs):
+    return compute_rms_amplitude_master(data, setpoint)[1]
+
+def compute_efficiency(data, setpoint: controls.ControlPoint):
+    dmm: dict = data["dmm"]
+    thrust_mN: float = data["thrust"]
+    thrust_N = thrust_mN / 1000
+    current_A = dmm["current"]
+    mdot = setpoint.anode_mass_flow_rate_kg_s
+    vd = setpoint.discharge_voltage_v
+    return 0.5 * thrust_N**2 / mdot / vd / current_A
+
+def efficiency_obj(data, setpoint):
+    return (1 - compute_efficiency(data, setpoint))
 
 def parse_control_vars(text):
     return [x.strip() for x in text.split(",") if x.strip()]
@@ -117,7 +130,6 @@ def main(args):
 
     dim = len(control_vars)
 
-
     output_dir = Path(args.output)
     os.makedirs(output_dir, exist_ok=True)
 
@@ -129,7 +141,10 @@ def main(args):
     initial_controls += [np.array([np.random.uniform(lb, ub) for (lb, ub) in bounds]) for _ in range(dim)]
     print(f"{initial_controls=}")
 
-    metric_fn = rms_amplitude_pct
+    if args.objective == "rms":
+        metric_fn = rms_amplitude_pct
+    elif args.objective == "efficiency":
+        metric_fn = efficiency_obj
 
     surrogate = Surrogate(
         dim=dim,
@@ -171,10 +186,10 @@ def main(args):
 
     best_setpoint = None
     best_metric = np.inf
-    max_no_improvement = 5
+    max_no_improvement = 10
     no_improvement_timer = 0
 
-    with labview.LabViewClient(host=args.host_ip, port=args.port) as client:
+    with labview.LabViewClient(host=args.host_ip, port=args.port, timeout=30) as client:
         for step in range(args.num_steps):
             if step < dim+1:
                 c_current = initial_controls[step]
@@ -224,19 +239,26 @@ def main(args):
                 sources=args.data,
             )
 
-            z_actual = metric_fn(data)
+            z_actual = metric_fn(data, setpoint)
             if z_actual < best_metric:
                 best_setpoint = setpoint
                 best_metric = z_actual
                 no_improvement_timer = 0
-            else:
+            elif surrogate.is_trained:
                 no_improvement_timer += 1
                 print(f"No improvement on best. Timer = {no_improvement_timer}/{max_no_improvement}")
+                if no_improvement_timer > max_no_improvement:
+                    break
 
-            mean_current = data["dmm"].current
-            rms_pct = rms_amplitude_pct(data)
-            rms_raw = rms_amplitude_raw(data)
+            mean_current = data["dmm"]["current"]
+            rms_pct = rms_amplitude_pct(data, setpoint)
+            rms_raw = rms_amplitude_raw(data, setpoint)
             print(f"Mean: {mean_current:.3f} A, RMS Amplitude: {rms_raw:.3f} A ({rms_pct*100:.2f}%)")
+
+            if args.objective == "efficiency":
+                thrust = data["thrust"]
+                efficiency = compute_efficiency(data, setpoint)
+                print(f"Thrust: {thrust:.3f} mN, efficiency: {efficiency:.3f}")
 
             surrogate.update(c_current, z_actual)
             if surrogate.is_trained:
@@ -279,7 +301,6 @@ def main(args):
 
             print(f"z = {z_actual:.6g} (best = {best_metric:.6g})")
             print(f"Surrogate trained: {surrogate.is_trained}")
-            print(f"Number of surrogate points: {len(surrogate.Y)}")
             print(f"Saved: {out_file}")
 
         if args.reset_at_end or best_setpoint is None:
