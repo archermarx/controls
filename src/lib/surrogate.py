@@ -22,7 +22,7 @@ class Surrogate:
         self.dim = dim
         self.bounds = bounds
         self.min_points = min_points if min_points is not None else max(2, dim + 1)
-        self.theta0 = theta0 if theta0 is not None else [1e-2] * dim
+        self.theta0 = theta0 if theta0 is not None else [1e-1] * dim
         self.corr = corr
         self.optimize_restarts = optimize_restarts
 
@@ -288,18 +288,28 @@ class Surrogate:
             self.is_trained = False
             return
 
-        model = KRG(
-            theta0=self.theta0,
-            corr=self.corr,
-            print_global=False,
-            eval_noise=True,
-            hyper_opt="Cobyla",
-        )
+        best_model, best_lml = None, -np.inf
 
-        model.set_training_values(X_unique, Y_unique.reshape(-1, 1))
-        model.train()
+        # Multistart hyperparameter optimization
+        theta_bounds = [1e-1, 1.0]
+        for _ in range(10):
+            theta0 = 10 ** np.random.uniform(np.log10(theta_bounds[0]), np.log10(theta_bounds[1]), self.dim)  # random log-scale init
+            model = KRG(
+                theta0=theta0,
+                corr=self.corr,
+                theta_bounds=theta_bounds,
+                print_global=False,
+                eval_noise=True,
+                hyper_opt="Cobyla",
+            )
+            model.set_training_values(X_unique, Y_unique.reshape(-1, 1))
+            model.train()
+        
+            lml = model.optimal_rlf_value  # SMT stores this
+            if lml > best_lml:
+                best_lml, best_model = lml, model
 
-        self.model = model
+        self.model = best_model
         self.is_trained = True
 
     def _remove_duplicate_points(self, X, Y):
