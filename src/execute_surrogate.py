@@ -43,7 +43,7 @@ parser.add_argument("--remote-dir", type=Path)
 
 def compute_rms_amplitude_master(data, setpoint):
     dmm = data["dmm"]
-    anode_current: labview.OscopeReadings = data["oscope"]["Anode Current"]
+    anode_current = labview.OscopeReadings(**data["oscope"]["Anode Current"])
 
     time, current = anode_current.waveform.time_values(), anode_current.waveform.y_values()
     mean_oscope = np.mean(current)
@@ -147,9 +147,7 @@ def main(args):
         metric_fn = efficiency_obj
 
     surrogate = Surrogate(
-        dim=dim,
         bounds=bounds,
-        min_points=dim+1,
         optimize_restarts=args.optimize_restarts,
         acquisition=args.acquisition,
         seed=args.seed,
@@ -265,7 +263,6 @@ def main(args):
                 if dim == 1:
                     fig, axs = plt.subplots(2,1, layout='constrained', figsize=(6,6))
                     surrogate.plot_1d_on_axis(axs[1])
-
                     lb, ub = bounds[0]
                     x = np.linspace(lb, ub, 100)
                     ei = [surrogate.expected_improvement([_x]) for _x in x]

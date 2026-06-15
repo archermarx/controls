@@ -275,19 +275,17 @@ class Surrogate:
 
         return x
     
-    def plot_1d(
+    def plot_1d_on_axis(
         self,
+        ax,
         ground_truth=None,
         num_points=400,
-        errorbar_points=25,
         confidence=2.0,
         xlabel="Control c",
         ylabel="Metric z",
         title="Kriging surrogate",
         ground_truth_label="Ground truth",
-        filename=None,
         extension=0,
-        show=True,
     ):
         """
         Plot a one-dimensional Kriging surrogate and its uncertainty.
@@ -360,22 +358,6 @@ class Surrogate:
 
         confidence_lower = predicted_mean - uncertainty
         confidence_upper = predicted_mean + uncertainty
-
-        # Use only a smaller number of points for error bars so the plot
-        # does not become overcrowded
-        error_indices = np.linspace(
-            0,
-            num_points - 1,
-            min(errorbar_points, num_points),
-            dtype=int,
-        )
-
-        # Surrogate-predicted minimum
-        c_best, z_best = self.optimize(
-            acquisition="mean"
-        )
-
-        fig, ax = plt.subplots(figsize=(9, 6))
 
         # Plot the Kriging mean function
         ax.plot(
@@ -455,26 +437,6 @@ class Surrogate:
                 label=ground_truth_label,
             )
 
-        # Show the minimum found by optimize()
-        ax.scatter(
-            c_best[0],
-            z_best,
-            marker="*",
-            s=180,
-            label="Surrogate-predicted minimum",
-            zorder=5,
-        )
-
         ax.set(xlabel=xlabel, ylabel=ylabel, title=title)
         ax.grid(True, alpha=0.3)
         ax.legend()
-
-        fig.tight_layout()
-
-        if filename is not None:
-            fig.savefig(filename, dpi=200, bbox_inches="tight")
-
-        if show:
-            plt.show()
-
-        return fig, ax

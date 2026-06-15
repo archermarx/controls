@@ -5,6 +5,8 @@ from pydantic import BaseModel, ValidationError
 from pathlib import Path
 import json
 
+from dataclasses import asdict
+
 import numpy as np
 
 import lib.labview as labview
@@ -258,7 +260,7 @@ class ThrusterController:
             waveform_config = labview.OscopeConfig(time_base=oscope_time_base, channels=waveform_channels)
             labview.set_oscope_config(client, waveform_config)
             oscope_readings = labview.get_oscope_readings(client)
-            out = {r.label: r for r in oscope_readings}
+            out = {r.label: asdict(r) for r in oscope_readings}
 
             # Reset ranges and turn off waveform collection
             labview.set_oscope_config(client, init_config)
@@ -293,15 +295,15 @@ class ThrusterController:
 
         out = {}
         if "dmm" in data_sources:
-            out["dmm"] = labview.get_dmm_readings(client).to_dict()
+            out["dmm"] = asdict(labview.get_dmm_readings(client))
         if "magna" in data_sources:
-            out["magna"] = labview.get_magna_readings(client)
+            out["magna"] = asdict(labview.get_magna_readings(client))
         if "alicat" in data_sources:
             alicat_readings = labview.get_alicat_readings(client)
-            out["alicat"] = {r.label: r for r in alicat_readings}
+            out["alicat"] = {r.label: asdict(r) for r in alicat_readings}
         if "lambda" in data_sources:
             lambda_readings = labview.get_lambda_readings(client)
-            out["lambda"] = {r.label: r for r in lambda_readings}
+            out["lambda"] = {r.label: asdict(r) for r in lambda_readings}
         if "thruststand" in data_sources:
             out["thrust"] = self.take_thrust(client, num_avg_pts=num_thrust_points)
         if "oscope" in data_sources:

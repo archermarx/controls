@@ -36,7 +36,7 @@ def num_digits(n):
 
 def compute_rms_amplitude(data):
     dmm: dict = data["dmm"]
-    anode_current: labview.OscopeReadings = data["oscope"]["Anode Current"]
+    anode_current = labview.OscopeReadings(**data["oscope"]["Anode Current"])
 
     time, current = anode_current.waveform.time_values(), anode_current.waveform.y_values()
     mean_oscope = np.mean(current)

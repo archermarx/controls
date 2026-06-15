@@ -6,7 +6,7 @@ from numpy.typing import NDArray
 from dataclasses import dataclass, asdict, fields, is_dataclass
 from typing import Any, Literal, Annotated, get_args, get_origin, get_type_hints
 
-import socket, struct, time
+import socket, struct
 
 from enum import Enum
 
@@ -195,8 +195,6 @@ class LambdaControl:
 @dataclass
 class KeysightDMMReadings:
     current: float
-    def to_dict(self):
-        return {"current": self.current}
 
 @dataclass
 class OscopeAxis:
