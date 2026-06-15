@@ -20,9 +20,8 @@ from lib import surrogate as surrogate
 def _ax_plot_surrogate_1d(ax, xs, ys, metadata, iter):
     lb = metadata["lower_bound"]
     ub = metadata["upper_bound"]
-    bounds = [(lb, ub)]
 
-    surr = surrogate.Surrogate(dim=1, bounds=bounds, corr="matern52")
+    surr = surrogate.Surrogate(bounds=(lb, ub), kernel="matern52")
     surr.X = xs
     surr.Y = ys
     surr._fit()
@@ -43,9 +42,8 @@ def _ax_plot_surrogate_1d(ax, xs, ys, metadata, iter):
 def _ax_plot_surrogate_2d(ax, xs, ys, metadata, iter):
     lb = metadata["lower_bound"]
     ub = metadata["upper_bound"]
-    bounds = [(_lb, _ub) for (_lb, _ub) in zip(lb, ub)]
     
-    surr = surrogate.Surrogate(dim=2, bounds=bounds)
+    surr = surrogate.Surrogate(bounds=(lb, ub))
     surr.X = xs
     surr.Y = ys
     surr._fit()

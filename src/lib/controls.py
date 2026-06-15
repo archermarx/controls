@@ -8,8 +8,7 @@ import json
 import numpy as np
 
 import lib.labview as labview
-from lib.labview import LabViewClient, MagnaControl, AlicatControl, LambdaControl, \
-                    DeviceCommands
+from lib.labview import LabViewClient, MagnaControl, AlicatControl, LambdaControl, DeviceCommands
 
 # Conversion factors from mg/s to SCCM for noble gas propellants
 MGS_TO_SCCM = {
@@ -77,8 +76,8 @@ class ThrusterController:
             self, cal_file: str | Path, 
             propellant: str = "Kr",
             verbose: bool = False,
-            voltage_range: tuple[float, float] = (200, 800),
-            flow_range: tuple[float, float] = (100, 800),
+            voltage_range: tuple[float, float] = (0, 800),
+            flow_range: tuple[float, float] = (0, 800),
         ):
         self.setpoint = None
         self.verbose = verbose
@@ -97,6 +96,9 @@ class ThrusterController:
         self.voltage_range = voltage_range
         self.flow_range = flow_range
         self.cathode_flow_range = (0.05 * flow_range[0], 0.1 * flow_range[1])
+
+        # Oscope ranges
+        self.oscope_time_width = 10e-3
     
     def control_to(
             self,
@@ -140,7 +142,6 @@ class ThrusterController:
                 calibrate(anode_flow_rate_sccm, self.cal["anode_flow"]),
                 self.flow_range
             ),
-            units="sccm"
         )
         cathode_flow_control = AlicatControl(
             label="cathode",
@@ -148,7 +149,6 @@ class ThrusterController:
                 calibrate(cathode_flow_rate_sccm, self.cal["cathode_flow"]),
                 self.cathode_flow_range,
             ),
-            units="sccm"
         )
         alicat_control = [anode_flow_control, cathode_flow_control]
 
@@ -167,6 +167,7 @@ class ThrusterController:
             overvoltage_protection=VOLTAGE_LIMIT,
             enable=True
         )
+
         outer_magnet = LambdaControl(
             label="outer",
             current_limit=calibrate(outer_scale * self.magnet_currents["outer"], self.cal["outer_magnet"]),
@@ -177,13 +178,14 @@ class ThrusterController:
         lambda_control = [inner_magnet, outer_magnet]
 
         if set_magna:
-            labview.set_magna_control(client, magna_control, self.verbose)
+            labview.set_magna_control(client, magna_control)
 
         if set_alicats:
-            labview.set_alicat_control(client, alicat_control, self.verbose)
+            labview.set_alicat_control(client, alicat_control)
 
         if set_lambdas:
-            labview.set_lambda_control(client, lambda_control, self.verbose)
+            print("Setting lambdas")
+            labview.set_lambda_control(client, lambda_control)
             
         return DeviceCommands(magna_control, alicat_control, lambda_control)
 
@@ -212,32 +214,73 @@ class ThrusterController:
         s0 = cal["shunt_at_setpoint"]
         m = cal["slope"]
         b = cal["intercept"]
-        return m * (s_mean - s0) + b
+        return {"shunt": s_mean, "thrust_N": m * (s_mean - s0) + b}
 
-    def take_data(self, client: LabViewClient, delay: int = 0, sources: list[str] | None = None):
+    def take_oscope(self, client: LabViewClient):
+        # O-scope time base
+        oscope_time_base = labview.OscopeTimeBase(range=self.oscope_time_width, position=0, reference=1)
+
+        # Configure oscope to not collect waveforms so we can grab the averages and peak to peak amplitudes
+        # The oscope has 8-bit depth so we want to ensure we get maximum resolution when we get waveforms
+        # This requires that we rescale things on the fly
+        # Note: the keys are hard-coded here. We shouldn't do this.
+        vd = 300.0 if self.setpoint is None else self.setpoint.discharge_voltage_v
+        self.current_limit = 40
+        variable_settings = {
+            "Anode Current": dict(offset=self.current_limit/2, range=self.current_limit),
+            "Cathode Current": dict(offset=self.current_limit/2, range=self.current_limit),
+            "Discharge Voltage": dict(offset=vd, range=vd),
+            "C2G Voltage": dict(offset=-18, range=40),
+        }
+        channels = [
+            labview.OscopeChannelConfig(k, range=v["range"], offset=v["offset"], collect_waveforms=False)
+            for (k, v) in variable_settings.items()
+        ]
+        init_config = labview.OscopeConfig(time_base=oscope_time_base, channels=channels)
+        labview.set_oscope_config(client, init_config)
+
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            # Read oscope to get p2p and average so we can rescale to a tighter window
+            prelim_readings = labview.get_oscope_readings(client)
+
+            # Configure oscope to collect waveforms
+            # For each channel, we need to get the mean and p2p and use this to set the range
+            waveform_channels = []
+            for reading in prelim_readings:
+                waveform_channels.append(labview.OscopeChannelConfig(
+                    label=reading.label,
+                    range=(1.5 if reading.label != "C2G Voltage" else 2.5) * reading.peak_to_peak,
+                    offset=reading.average,
+                    collect_waveforms=True,
+                ))
+
+            waveform_config = labview.OscopeConfig(time_base=oscope_time_base, channels=waveform_channels)
+            labview.set_oscope_config(client, waveform_config)
+            oscope_readings = labview.get_oscope_readings(client)
+            out = {r.label: r for r in oscope_readings}
+
+            # Reset ranges and turn off waveform collection
+            labview.set_oscope_config(client, init_config)
+
+            repeat = False
+            for r in oscope_readings:
+                if len(r.waveform.data) == 0:
+                    print(f"Warning: waveform not collected for channel {r.label}. Repeating (try {attempt+1}/{max_attempts}).")
+                    repeat = True
+            
+            if not repeat:
+                return out
+
+        return None
+
+    def take_data(self, client: LabViewClient, delay: int = 0, num_thrust_points=10, sources: list[str] | None = None):
         assert self.setpoint is not None
         
         if not sources: 
             data_sources = set(["dmm", "magna", "alicat", "lambda", "oscope", "thruststand"])
         else:
             data_sources = set(sources)
-
-        # Configure oscope to not collect waveforms so we can grab the averages and peak to peak amplitudes
-        # The oscope has 8-bit depth so we want to ensure we get maximum resolution when we get waveforms
-        # This requires that we rescale things on the fly
-        # Note: the keys are hard-coded here. We shouldn't do this.
-        if "oscope" in data_sources:
-            variable_settings = {
-                "Anode Current": dict(offset=self.current_limit/2, range=self.current_limit),
-                "Cathode Current": dict(offset=self.current_limit/2, range=self.current_limit),
-                "Discharge Voltage": dict(offset=self.setpoint.discharge_voltage_v, range=250),
-                "C2G Voltage": dict(offset=-18, range=40),
-            }
-            init_configs = [
-                labview.OscopeConfig(k, range=v["range"], offset=v["offset"], collect_waveforms=False)
-                for (k, v) in variable_settings.items()
-            ]
-            labview.set_oscope_config(client, init_configs)
 
         # Pause according to prescribed delay
         if delay > 0:
@@ -260,39 +303,9 @@ class ThrusterController:
             lambda_readings = labview.get_lambda_readings(client)
             out["lambda"] = {r.label: r for r in lambda_readings}
         if "thruststand" in data_sources:
-            out["thrust"] = self.take_thrust(client, num_avg_pts = 20)
+            out["thrust"] = self.take_thrust(client, num_avg_pts=num_thrust_points)
         if "oscope" in data_sources:
-            max_attempts = 3
-            for attempt in range(max_attempts):
-                # Read oscope to get p2p and average so we can rescale to a tighter window
-                prelim_readings = labview.get_oscope_readings(client)
-
-                # Configure oscope to collect waveforms
-                # For each channel, we need to get the mean and p2p and use this to set the range
-                waveform_configs = []
-                for reading in prelim_readings:
-                    waveform_configs.append(labview.OscopeConfig(
-                        label=reading.label,
-                        range=(1.5 if reading.label != "C2G Voltage" else 2.5) * reading.peak_to_peak,
-                        offset=reading.average,
-                        collect_waveforms=True,
-                    ))
-
-                labview.set_oscope_config(client, waveform_configs)
-                oscope_readings = labview.get_oscope_readings(client)
-                out["oscope"] = {r.label: r for r in oscope_readings}
-
-                # Reset ranges and turn off waveform collection
-                labview.set_oscope_config(client, init_configs)
-
-                repeat = False
-                for r in oscope_readings:
-                    if len(r.waveform.data) == 0:
-                        print(f"Warning: waveform not collected for channel {r.label}. Repeating (try {attempt+1}/{max_attempts}).")
-                        repeat = True
-                
-                if not repeat:
-                    break
+            out["oscope"] = self.take_oscope(client)
 
         return out
         

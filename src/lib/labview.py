@@ -3,10 +3,12 @@ from __future__ import annotations
 import numpy as np
 from numpy.typing import NDArray
 
-from dataclasses import dataclass, asdict
-from typing import Any
+from dataclasses import dataclass, asdict, fields, is_dataclass
+from typing import Any, Literal, Annotated, get_args, get_origin, get_type_hints
 
 import socket, struct, time
+
+from enum import Enum
 
 # GLOBAL VARIABLES
 
@@ -25,109 +27,169 @@ HEADER_FMT = '>bi'                                  # byte command_id, signed in
 HEADER_LENGTH = struct.calcsize(HEADER_FMT)
 
 # Command Constants from API_Short.xlsx
-CMD_MAGNA_GET_READINGS = 0x12                       # Command 18
-CMD_MAGNA_SET_CONTROL = 0x13                        # Command 19
+CMD_MAGNA_GET_READINGS  = 18
+CMD_MAGNA_SET_CONTROL   = 19
 
-CMD_ALICAT_GET_READINGS = 0x1B                      # Command 27
-CMD_ALICAT_SET_CONTROL = 0x1C                       # Command 28
+CMD_ALICAT_FETCH        = 24
+CMD_ALICAT_SET_COMMS    = 25
+CMD_ALICAT_SET_CONFIG   = 26                  
+CMD_ALICAT_GET_READINGS = 27
+CMD_ALICAT_SET_CONTROL  = 28
 
-CMD_LAMBDA_GET_READINGS = 0x23                      # Command 35
-CMD_LAMBDA_SET_CONTROL = 0x24                       # Command 36
+CMD_LAMBDA_GET_READINGS = 35
+CMD_LAMBDA_SET_CONTROL  = 36
 
-CMD_OSCOPE_SET_CONFIG = 0x2A                        # Command 42
-CMD_OSCOPE_GET_READINGS = 0x2B                      # Command 43
+CMD_OSCOPE_SET_CONFIG   = 42
+CMD_OSCOPE_GET_READINGS = 43
                                                     
-CMD_DMM_GET_READINGS = 0x31                         # Command 49
+CMD_DMM_GET_READINGS    = 49
 
-CMD_THRUSTSTAND_FETCH = 56
+CMD_THRUSTSTAND_FETCH             = 56
 CMD_THRUSTSTAND_SET_COMMUNICATION = 57
-CMD_THRUSTSTAND_SET_CONFIG = 58                
-CMD_THRUSTSTAND_GET_READINGS = 59
+CMD_THRUSTSTAND_SET_CONFIG        = 58                
+CMD_THRUSTSTAND_GET_READINGS      = 59
+
+# Data Structures
+class IntWidth(Enum):
+    U8 = "u8"
+    U16 = "u16"
+    U32 = "u32"
+    I8 = "i8"
+    I16 = "i16"
+    I32 = "i32"
+
+class FloatWidth(Enum):
+    F32 = "f32"
+    F64 = "f64"
+
+U8, U16, U32 = IntWidth.U8, IntWidth.U16, IntWidth.U32,
+I8, I16, I32 = IntWidth.I8, IntWidth.I16, IntWidth.I32,
+F32, F64 = FloatWidth.F32, FloatWidth.F64
 
 # ---------------------------------------------------------------------------
+# Generic pack/unpack based on dataclass field type hints.
+#
+# Plain `int` defaults to i32 and plain `float` defaults to f64. Use
+# Annotated[int, U8/U16/U32/I8/I16/I32] or Annotated[float, F32/F64] to
+# override. Nested dataclasses, list[T] (array of clusters), and
+# NDArray[dtype] fields (length-prefixed arrays) are handled automatically.
+
+def _unwrap_annotated(tp: Any) -> tuple[Any, tuple[Any, ...]]:
+    if get_origin(tp) is Annotated:
+        base, *metadata = get_args(tp)
+        return base, tuple(metadata)
+    return tp, ()
+
+def _ndarray_dtype(tp: Any) -> Any:
+    _, dtype_arg = get_args(tp)
+    (dtype,) = get_args(dtype_arg)
+    return dtype
+
+def pack_struct(value, tp: Any) -> bytes:
+    writer = LabViewWriter()
+    writer.pack_value(value, tp)
+    return writer.bytes()
+
+def unpack_struct(payload: bytes, tp: Any) -> Any:
+    reader = LabViewReader(payload)
+    result = reader.unpack_value(tp)
+    reader.assert_consume_all(str(tp))
+    return result
 
 # ---------------------------------------------------------------------------
-
-# Safe Operating Ranges for H9 HET
-# DISCHARGE_VOLTAGE_MIN = 300.0                       # Volts
-# DISCHARGE_VOLTAGE_MAX = 400.0                       # Volts
-
-# DISCHARGE_CURRENT_MIN = 15.0                        # Amps
-# DISCHARGE_CURRENT_MAX = 30.0                        # Amps
-
-# MASS_FLOW_MIN = 10.0                                # mg/sec
-# MASS_FLOW_MIN = 20.0                                # mg/sec
-
-# MAGNET_PERCENT_MIN = 75.0                           # %
-# MAGNET_PERCENT_MAX = 125.0                          # %
-# ---------------------------------------------------------------------------
-
-
-
-# Data Structures 
 
 @dataclass
 class MagnaReadings:
-    voltage: float
-    current: float
+    voltage: Annotated[float, F64]
+    current: Annotated[float, F64]
     enabled: bool
-    voltage_limit: float
-    current_limit: float
-    overvoltage_trip: float
-    overcurrent_trip: float
+    voltage_limit: Annotated[float, F64]
+    current_limit: Annotated[float, F64]
+    overvoltage_trip: Annotated[float, F64]
+    overcurrent_trip: Annotated[float, F64]
     local_control: bool
     alarm: bool
 
 @dataclass
 class MagnaControl:
-    voltage_limit: float
-    current_limit: float
-    overvoltage_trip: float
-    overcurrent_trip: float
+    voltage_limit: Annotated[float, F64]
+    current_limit: Annotated[float, F64]
+    overvoltage_trip: Annotated[float, F64]
+    overcurrent_trip: Annotated[float, F64]
     enable: bool
+
+GasType = Literal["Air", "Ar", "CO2", "H2", "He", "N2", "N2O", "Ne", "O2", "Kr", "Xe"] 
+GAS_INDICES = {g: i for (i, g) in enumerate(get_args(GasType))}
+
+@dataclass
+class AlicatDeviceComms:
+    label: str
+    id: Annotated[int, U8]
+
+@dataclass
+class AlicatCommunications:
+    hub_address: str
+    port: Annotated[int, U16]
+    connection: Annotated[int, I32]
+    devices: list[AlicatDeviceComms]
+
+@dataclass
+class AlicatConfig:
+    label: str
+    gas:  Annotated[int, U16]
+    remote_lockout: bool = False
+
+@dataclass
+class AlicatControl:
+    label: str
+    setpoint: Annotated[float, F64]
+    valve_hold: bool = False
+
+# class AlicatReadings:
+#     label: str
+#     gas: str
+#     setpoint: float
+#     setpoint_units: str
+#     mass_flow: float
+#     mass_flow_units: str
+#     pressure: float
+#     pressure_units: str
+#     temperature: float
+#     temperature_units: str
+#     volume_flow: float
+#     volume_flow_units: str
+#     valve_hold: bool
 
 @dataclass
 class AlicatReadings:
     label: str
     gas: str
-    setpoint: float
-    setpoint_units: str
-    mass_flow: float
-    mass_flow_units: str
-    pressure: float
-    pressure_units: str
-    temperature: float
-    temperature_units: str
-    volume_flow: float
-    volume_flow_units: str
+    setpoint: Annotated[float, F64]
+    mass_flow: Annotated[float, F64]
+    pressure: Annotated[float, F64]
+    temperature: Annotated[float, F64]
+    volume_flow: Annotated[float, F64]
     valve_hold: bool
-
-@dataclass
-class AlicatControl:
-    label: str
-    setpoint: float
-    units: str
-    loop_control_variable: int=0            # U16 ENUM (unsigned word - 16 bits): 0 = Mass Flow, 1 = | Pressure |, 2 = Volume Flow
-    valve_hold: bool = False
 
 @dataclass
 class LambdaReadings:
     label: str
-    voltage: float
-    current: float
+    voltage: Annotated[float, F64]
+    current: Annotated[float, F64]
     enable: bool
-    voltage_limit: float
-    current_limit: float
-    overvoltage_protection: float
-    remote_mode: int                        # U8 ENUM (unsigned byte - unsigned 8 bit int): 0 = Local, 1 = Remote, 2 = Local Lockout
+    voltage_limit: Annotated[float, F64]
+    current_limit: Annotated[float, F64]
+    overvoltage_protection: Annotated[float, F64]
+    # U8 ENUM: 0 = Local, 1 = Remote, 2 = Local Lockout
+    remote_mode: Annotated[int, U8]         
     fault: bool
 
 @dataclass
 class LambdaControl:
     label: str
-    voltage_limit: float
-    current_limit: float
-    overvoltage_protection: float
+    voltage_limit: Annotated[float, F64]
+    current_limit: Annotated[float, F64]
+    overvoltage_protection: Annotated[float, F64]
     enable: bool = False
 
 @dataclass
@@ -138,9 +200,9 @@ class KeysightDMMReadings:
 
 @dataclass
 class OscopeAxis:
-    increment: float
-    origin: float
-    reference: int
+    increment: Annotated[float, F64]
+    origin: Annotated[float, F64]
+    reference: Annotated[int, U32]
 
 @dataclass
 class OscopeWaveform:
@@ -181,31 +243,43 @@ class OscopeWaveform:
         if len(self.data) <= 1:
             return 0.0
         return(len(self.data) - 1) * abs(self.x.increment)
+
+@dataclass
+class OscopeTimeBase:
+    range: Annotated[float, F64]
+    # 0 for left, 1 for center, 2 for right
+    reference: Annotated[int, U8] = 1 
+    position: Annotated[float, F64] = 0.0
+
+@dataclass
+class OscopeChannelConfig:
+    label: str
+    range: Annotated[float, F64]
+    offset: Annotated[float, F64]
+    collect_waveforms: bool
+
+@dataclass
+class OscopeConfig:
+    time_base: OscopeTimeBase
+    channels: list[OscopeChannelConfig]
         
 @dataclass
 class OscopeReadings:
     label: str
-    peak_to_peak: float
-    rms: float
-    average: float
+    peak_to_peak: Annotated[float, F64]
+    rms: Annotated[float, F64]
+    average: Annotated[float, F64]
     waveform: OscopeWaveform
 
 @dataclass
-class OscopeConfig:
-    label: str
-    range: float
-    offset: float
-    collect_waveforms: bool
-
-@dataclass
 class PIDGain:
-    Kp: float
-    Ki: float
-    Kd: float
+    Kp: Annotated[float, F64] 
+    Ki: Annotated[float, F64]
+    Kd: Annotated[float, F64]
 
 @dataclass
 class ThrustStandConfig:
-    num_points: int
+    num_points: Annotated[int, U16]
     gains: PIDGain
 
 @dataclass
@@ -246,26 +320,38 @@ class LabViewReader:
         self.offset +=n
         return out
 
+    # Signed 8 bit integer (big-endian)
+    def i8(self) -> int:
+        return struct.unpack(">b", self.read_payload(1))[0]
+
+    # Signed 16 bit integer (big-endian)
+    def i16(self) -> int:
+        return struct.unpack(">h", self.read_payload(2))[0]
+
     # Signed 32 bit integer (big-endian)
     def i32(self) -> int:
         return struct.unpack(">i", self.read_payload(4))[0]
-    
+
     # Unsigned 8 bit integer (big-endian)
     def u8(self) -> int:
         return struct.unpack(">B", self.read_payload(1))[0]
-    
+
     # Unsigned 16 bit integer (big-endian)
     def u16(self) -> int:
         return struct.unpack(">H", self.read_payload(2))[0]
-    
+
     # Unsigned 32 bit integer (big_endian)
     def u32(self) -> int:
         return struct.unpack(">I", self.read_payload(4))[0]
-    
+
+    # 32-bit float (big-endian)
+    def f32(self) -> float:
+        return struct.unpack(">f", self.read_payload(4))[0]
+
     # 64-bit float (big-endian)
     def f64(self) -> float:
         return struct.unpack(">d", self.read_payload(8))[0]
-    
+
     # Boolean (big-endian)
     def boolean(self) -> bool:
         return self.u8() != 0
@@ -306,6 +392,40 @@ class LabViewReader:
                 f"{context}: decoded payload but {self.remaining()} bytes remain unconsumed. "
                 f"Number of Extra Bytes: {extra.hex(' ')}"
                 )
+
+    def unpack_dataclass(self, cls: type) -> Any:
+        hints = get_type_hints(cls, include_extras=True)
+        kwargs = {
+            field.name: self.unpack_value(hints[field.name])
+            for field in fields(cls)
+        }
+        return cls(**kwargs)
+
+    def unpack_value(self, tp: Any) -> Any:
+        base, metadata = _unwrap_annotated(tp)
+
+        for marker in metadata:
+            if isinstance(marker, (IntWidth, FloatWidth)):
+                return getattr(self, marker.value)()
+
+        if base is float:
+            return self.f64()
+        elif base is bool:
+            return self.boolean()
+        elif base is int:
+            return self.i32()
+        elif base is str:
+            return self.string()
+        elif is_dataclass(base):
+            return self.unpack_dataclass(base) # type:ignore
+        elif get_origin(base) is list:
+            (item_type,) = get_args(base)
+            length = self.array_length("array")
+            return [self.unpack_value(item_type) for _ in range(length)]
+        elif get_origin(base) is np.ndarray:
+            return self.read_array(_ndarray_dtype(base), "array")
+        else:
+            raise TypeError(f"Don't know how to unpack field of type {tp!r}")
     
 class LabViewWriter:
     def __init__(self):
@@ -314,6 +434,12 @@ class LabViewWriter:
     def bytes(self) -> bytes:
         return b"".join(self.value_types)
     
+    def i8(self, value: int) -> None:
+        self.value_types.append(struct.pack(">b", int(value)))
+
+    def i16(self, value: int) -> None:
+        self.value_types.append(struct.pack(">h", int(value)))
+
     def i32(self, value: int) -> None:
         self.value_types.append(struct.pack(">i", int(value)))
 
@@ -326,6 +452,9 @@ class LabViewWriter:
     def u32(self, value: int) -> None:
         self.value_types.append(struct.pack(">I", int(value)))
 
+    def f32(self, value: float) -> None:
+        self.value_types.append(struct.pack(">f", float(value)))
+
     def f64(self, value: float) -> None:
         self.value_types.append(struct.pack(">d", float(value)))
 
@@ -337,6 +466,46 @@ class LabViewWriter:
         self.i32(len(encoded))
         self.value_types.append(encoded)
 
+    # Length-prefixed 1D array, big-endian element encoding
+    def array(self, value: np.ndarray, dtype: np.typing.DTypeLike) -> None:
+        dt = np.dtype(dtype).newbyteorder('>')
+        arr = np.asarray(value, dtype=dt)
+        self.i32(len(arr))
+        self.value_types.append(arr.tobytes())
+
+    def pack_value(self, value: Any, tp: Any) -> None:
+        base, metadata = _unwrap_annotated(tp)
+
+        for marker in metadata:
+            if isinstance(marker, (IntWidth, FloatWidth)):
+                getattr(self, marker.value)(value)
+                return
+
+        if base is float:
+            self.f64(value)
+        elif base is bool:
+            self.boolean(value)
+        elif base is int:
+            self.i32(value)
+        elif base is str:
+            self.string(value)
+        elif is_dataclass(base):
+            self.pack_dataclass(value)
+        elif get_origin(base) is list:
+            (item_type,) = get_args(base)
+            self.i32(len(value))
+            for item in value:
+                self.pack_value(item, item_type)
+        elif get_origin(base) is np.ndarray:
+            self.array(value, _ndarray_dtype(base))
+        else:
+            raise TypeError(f"Don't know how to pack field of type {tp!r}")
+
+    def pack_dataclass(self, obj: Any) -> None:
+        hints = get_type_hints(type(obj), include_extras=True)
+        for field in fields(obj):
+            self.pack_value(getattr(obj, field.name), hints[field.name])
+
 def flatten_empty_string() -> bytes:
     writer = LabViewWriter()
     writer.string("")
@@ -344,227 +513,6 @@ def flatten_empty_string() -> bytes:
 
 def empty_payload() -> bytes:
     return flatten_empty_string() if SEND_EMPTY_ARG else b""
-
-def unpack_dmm_readings(payload: bytes) -> KeysightDMMReadings:
-    reader = LabViewReader(payload)
-    output = KeysightDMMReadings(
-        current = reader.f64()
-    )
-
-    reader.assert_consume_all("Keysight DMM readings")
-    return output
-
-# PEPL Lab Device Specific Unpacking Functions
-def unpack_magna_readings(payload: bytes) -> MagnaReadings:
-    reader = LabViewReader(payload)
-
-    output = MagnaReadings(
-        voltage = reader.f64(),
-        current = reader.f64(),
-        enabled = reader.boolean(),
-        voltage_limit = reader.f64(),
-        current_limit = reader.f64(),
-        overvoltage_trip = reader.f64(),
-        overcurrent_trip = reader.f64(),
-        local_control = reader.boolean(),
-        alarm = reader.boolean(),
-    )
-
-    reader.assert_consume_all("Magna Readings")
-    return output
-
-def unpack_alicat_readings(payload: bytes) -> list[AlicatReadings]:
-    reader = LabViewReader(payload)
-    
-    # Array of Clusters
-    n_controllers = reader.array_length("Alicat Readings")
-
-    output: list[AlicatReadings] = []
-    for _ in range(n_controllers):
-        output.append(
-            AlicatReadings(
-                label = reader.string(),
-                gas = reader.string(),
-                setpoint = reader.f64(),
-                setpoint_units = reader.string(),
-                mass_flow = reader.f64(),
-                mass_flow_units = reader.string(),
-                pressure = reader.f64(),
-                pressure_units = reader.string(),
-                temperature = reader.f64(),
-                temperature_units = reader.string(),
-                volume_flow = reader.f64(),
-                volume_flow_units = reader.string(),
-                valve_hold = reader.boolean(),
-            )
-        )
-
-    reader.assert_consume_all("Alicat Readings")
-    return output
-
-def unpack_lambda_readings(payload: bytes) -> list[LambdaReadings]:
-    reader = LabViewReader(payload)
-    
-    # Array of Clusters
-    n_supplies = reader.array_length("Lambda Readings")
-
-    output: list[LambdaReadings] = []
-    for _ in range(n_supplies):
-        output.append(
-            LambdaReadings(
-                label = reader.string(),
-                voltage = reader.f64(),
-                current = reader.f64(),
-                enable = reader.boolean(),
-                voltage_limit = reader.f64(),
-                current_limit = reader.f64(),
-                overvoltage_protection = reader.f64(),
-                remote_mode = reader.u8(),
-                fault = reader.boolean(),
-            )
-        )
-
-    reader.assert_consume_all("Lambda Readings")
-    return output
-
-
-def unpack_oscope_waveform(reader: LabViewReader) -> OscopeWaveform:
-    # Waveform Cluster from LabVIEW:
-    #   X Cluster: X increment (Double), X origin (Double), X Reference (U32)
-    #   Y Cluster: Y increment (Double), Y origin (Double), Y Reference (U32)
-    #   Data: 1D array (U16 points)
-    
-    x_axis = OscopeAxis(
-        increment = reader.f64(),
-        origin = reader.f64(),
-        reference = reader.u32(),
-    )
-
-    y_axis = OscopeAxis(
-        increment = reader.f64(),
-        origin = reader.f64(),
-        reference = reader.u32(),
-    )
-
-    data = reader.read_array(np.uint8, "Oscope waveform")
-    return OscopeWaveform(x = x_axis, y = y_axis, data = data)
-
-def unpack_oscope_readings(payload: bytes) -> list[OscopeReadings]:
-    reader = LabViewReader(payload)
-
-    # 1-D Array of Keysight O-Scope Single Readings.ctl" Clusters
-    n_readings = reader.array_length("Oscope Readings")
-
-    output: list[OscopeReadings] = []
-
-    for _ in range(n_readings):
-        output.append(
-            OscopeReadings(
-                label = reader.string(),
-                peak_to_peak = reader.f64(),
-                rms = reader.f64(),
-                average = reader.f64(),
-                waveform = unpack_oscope_waveform(reader),
-            )
-        )
-
-    reader.assert_consume_all("Oscope Readings")
-    return output
-
-def unpack_thruststand_readings(payload: bytes) -> ThrustStandReadings:
-    reader = LabViewReader(payload)
-
-    readings = ThrustStandReadings(
-        setpoint = reader.read_array(np.float64, "Thrust stand setpoint"),
-        input = reader.read_array(np.float64, "Thrust stand input"),
-        command = reader.read_array(np.uint16, "Thrust stand command"),
-        shunt = reader.read_array(np.int16, "Thrust stand shunt"),
-        tilt = reader.read_array(np.float64, "Thrust stand tilt"),
-    )
-
-    reader.assert_consume_all("Thrust stand readings")
-    return readings
-
-# PEPL Lab Device Specific Packing Functions
-def pack_magna_control(control: MagnaControl, verbose=False) -> bytes:
-    writer = LabViewWriter()
-
-    writer.f64(control.voltage_limit)
-    writer.f64(control.current_limit)
-    writer.f64(control.overvoltage_trip)
-    writer.f64(control.overcurrent_trip)
-    writer.boolean(control.enable)
-
-    bytes = writer.bytes()
-    if verbose:
-        print("Magna bytes:", bytes)
-    
-    return bytes
-
-def pack_oscope_config(controls: list[OscopeConfig], verbose=False) -> bytes:
-    writer = LabViewWriter()
-    writer.i32(len(controls))
-
-    for c in controls:
-        writer.string(c.label)
-        writer.f64(c.range)
-        writer.f64(c.offset)
-        writer.boolean(c.collect_waveforms)
-
-    bytes = writer.bytes()
-    if verbose:
-        print("Oscope config bytes:", bytes)
-    
-    return bytes
-
-def pack_alicat_control(controls: list[AlicatControl], verbose=False) -> bytes:
-    writer = LabViewWriter()
-
-    writer.i32(len(controls))
-
-    for c in controls:
-        writer.string(c.label)
-        writer.f64(c.setpoint)
-        writer.string(c.units)
-        writer.u16(c.loop_control_variable)
-        writer.boolean(c.valve_hold)
-
-    bytes = writer.bytes()
-    if verbose:
-        print("Alicat bytes:", bytes)
-    
-    return bytes
-
-def pack_lambda_control(controls: list[LambdaControl], verbose=False) -> bytes:
-    writer = LabViewWriter()
-
-    writer.i32(len(controls))
-    
-    for c in controls:
-        writer.string(c.label)
-        writer.f64(c.voltage_limit)
-        writer.f64(c.current_limit)
-        writer.f64(c.overvoltage_protection)
-        writer.boolean(c.enable)
-
-    bytes = writer.bytes()
-    if verbose:
-        print("Lambda bytes:", bytes)
-    
-    return bytes
-
-def pack_thruststand_config(config: ThrustStandConfig, verbose=False) -> bytes:
-    writer = LabViewWriter()
-
-    writer.u16(config.num_points)
-    writer.f64(config.gains.Kp)
-    writer.f64(config.gains.Ki)
-    writer.f64(config.gains.Kd)
-    
-    bytes = writer.bytes()
-    if verbose:
-        print(f"Thrust stand config bytes:", bytes)
-    return bytes
 
 # TCP Client 
 def receive_from_labview(socket: socket.socket, n_bytes: int) -> bytes:
@@ -583,7 +531,6 @@ def receive_from_labview(socket: socket.socket, n_bytes: int) -> bytes:
     return data
 
 class LabViewClient:
-    
     def __init__(self,
                  host: str = LABVIEW_IP,
                  port: int = LABVIEW_PORT,
@@ -657,8 +604,6 @@ class LabViewClient:
         _, response_payload = self.receive_packet(expected_command_id = command_id)
         return response_payload
     
-
-
 # API Handling
 
 def check_empty_ack(name: str, response_payload: bytes) -> None:
@@ -675,125 +620,87 @@ def check_empty_ack(name: str, response_payload: bytes) -> None:
 
 def get_magna_readings(client: LabViewClient) -> MagnaReadings:
     payload = client.request(CMD_MAGNA_GET_READINGS, empty_payload())
-    return unpack_magna_readings(payload)
+    return unpack_struct(payload, MagnaReadings)
     
-def set_magna_control(client: LabViewClient, control: MagnaControl, verbose=False) -> None:
-    response = client.request(CMD_MAGNA_SET_CONTROL, pack_magna_control(control, verbose))
+def set_magna_control(client: LabViewClient, control: MagnaControl) -> None:
+    payload = pack_struct(control, MagnaReadings)
+    response = client.request(CMD_MAGNA_SET_CONTROL, payload)
     return check_empty_ack("Magna Set Control", response)
+
+#-------------------------------------------
+# Alicat mass flow controllers
+#-------------------------------------------
+
+def set_alicat_config(client: LabViewClient, config: list[AlicatConfig]) -> None:
+    payload = pack_struct(config, list[AlicatCommunications])
+    response = client.request(CMD_ALICAT_SET_CONFIG, payload)
+    return check_empty_ack("Alicat Set Config", response)
+
+def set_alicat_control(client: LabViewClient, control: list[AlicatControl]) -> None:
+    payload = pack_struct(control, list[AlicatControl])
+    response = client.request(CMD_ALICAT_SET_CONTROL, payload)
+    return check_empty_ack("Alicat Set Control", response)
+
+def set_alicat_comms(client: LabViewClient, comms: AlicatCommunications):
+    payload = pack_struct(comms, AlicatCommunications)
+    response = client.request(CMD_ALICAT_SET_COMMS, payload)
+    return check_empty_ack("Alicat Set Comms", response)
+
+def get_alicat_comms(client: LabViewClient) -> AlicatCommunications:
+    # Send header
+    # TODO: fetch can be made more general!
+    # Depending on the value we send, we could get different values
+    header = LabViewWriter()
+    header.u8(0)
+    payload = client.request(CMD_ALICAT_FETCH, header.bytes())
+    return unpack_struct(payload, AlicatCommunications)
 
 def get_alicat_readings(client: LabViewClient) -> list[AlicatReadings]:
     payload = client.request(CMD_ALICAT_GET_READINGS, empty_payload())
-    return unpack_alicat_readings(payload)
+    return unpack_struct(payload, list[AlicatReadings])
 
-def set_alicat_control(client: LabViewClient, control: list[AlicatControl], verbose=False) -> None:
-    response = client.request(CMD_ALICAT_SET_CONTROL, pack_alicat_control(control, verbose))
-    return check_empty_ack("Alicat Set Control", response)
-
+#-------------------------------------------
+# Lambda power supplies
+#-------------------------------------------
 def get_lambda_readings(client: LabViewClient) -> list[LambdaReadings]:
     payload = client.request(CMD_LAMBDA_GET_READINGS, empty_payload())
-    return unpack_lambda_readings(payload)
+    return unpack_struct(payload, list[LambdaReadings])
 
-def set_lambda_control(client: LabViewClient, control: list[LambdaControl], verbose=False) -> None:
-    response = client.request(CMD_LAMBDA_SET_CONTROL, pack_lambda_control(control, verbose))
+def set_lambda_control(client: LabViewClient, control: list[LambdaControl]) -> None:
+    payload = pack_struct(control, list[LambdaControl])
+    response = client.request(CMD_LAMBDA_SET_CONTROL, payload)
     return check_empty_ack("Lambda Set Controls", response)
+
+#-------------------------------------------
+# Keysight oscilloscope
+#-------------------------------------------
 
 def get_oscope_readings(client: LabViewClient) -> list[OscopeReadings]:
     payload = client.request(CMD_OSCOPE_GET_READINGS, empty_payload())
-    return unpack_oscope_readings(payload)
+    return unpack_struct(payload, list[OscopeReadings])
+
+def set_oscope_config(client: LabViewClient, config: OscopeConfig) -> None:
+    payload = pack_struct(config, OscopeConfig)
+    response = client.request(CMD_OSCOPE_SET_CONFIG, payload)
+    return check_empty_ack("Oscope set config", response)
+
+#-------------------------------------------
+# Keysight DMM
+#-------------------------------------------
 
 def get_dmm_readings(client: LabViewClient) -> KeysightDMMReadings:
     payload = client.request(CMD_DMM_GET_READINGS, empty_payload())
-    return unpack_dmm_readings(payload)
+    return unpack_struct(payload, KeysightDMMReadings)
 
-def set_oscope_config(client: LabViewClient, config: list[OscopeConfig]) -> None:
-    response = client.request(CMD_OSCOPE_SET_CONFIG, pack_oscope_config(config))
-    return check_empty_ack("Oscope set config", response)
+#-------------------------------------------
+# Thrust stand
+#-------------------------------------------
 
 def set_thruststand_config(client: LabViewClient, config: ThrustStandConfig) -> None:
-    response = client.request(CMD_THRUSTSTAND_SET_CONFIG, pack_thruststand_config(config))
+    payload = pack_struct(config, ThrustStandConfig)
+    response = client.request(CMD_THRUSTSTAND_SET_CONFIG, payload)
     return check_empty_ack("Thrust stand set config", response)
 
 def get_thruststand_readings(client: LabViewClient) -> ThrustStandReadings:
     payload = client.request(CMD_THRUSTSTAND_GET_READINGS, empty_payload())
-    return unpack_thruststand_readings(payload)
-
-# Raw LabVIEW Collection
-def get_all_readings(client: LabViewClient, *, include_oscope: bool = True) -> dict[str, Any]:
-    magna_supplies = get_magna_readings(client)
-    alicat_supplies = get_alicat_readings(client)
-    lambda_supplies = get_lambda_readings(client)
-
-    packet: dict[str, Any] = {
-        "timestamp": time.time(),
-        "magna": asdict(magna_supplies),
-        "alicat": [asdict(item) for item in alicat_supplies],
-        "lambda": [asdict(item) for item in lambda_supplies],
-    }
-
-    if include_oscope:
-        oscope = get_oscope_readings(client)
-        packet["oscope"] = [asdict(item) for item in oscope]
-
-
-    return packet
-
-
-# Label Matching
-
-ANODE_ALICAT_LABEL = {
-    "anode",
-}
-
-CATHODE_ALICAT_LABLE = {
-    "cathode"
-}
-
-OUTER_MAGNET_LAMBDA = {
-    "outer"
-    "outer magnet"
-    "outer_magnet"
-}
-
-INNER_MAGNET_LAMBDA ={
-    "inner"
-    "inner magnet"
-    "inner_magnet"
-}
-
-OSCOPE_DISCHARGE_CURRENT = {
-    "discharge current"
-    "discharge_current"
-}
-
-OSCOPE_PLASMA_POTENTIAL = {
-    "plasma potenital"
-    "plasma_potential"
-}
-
-def normalize_categorization_label(label: str) -> str:
-    return "".join(ch.lower() for ch in str(label) if ch.isalnum())
-
-def get_field(item: Any, field_name: str, default: Any = None) -> Any:
-    if isinstance(item, dict):
-        return item.get(field_name, default)
-    return getattr(item, field_name, default)
-
-def find_by_label(items: list[Any], aliases: tuple[str, ...], device_kind: str) -> Any:
-    desired = {normalize_categorization_label(alias) for alias in aliases}
-
-    for item in items:
-        item_label = str(get_field(item, "label", ""))
-        if normalize_categorization_label(item_label) in desired:
-            return item
-        
-        avaiable_labels = [str(get_field(item, "label", "<missing label>"))]
-        raise ValueError(
-            f"Cound not find {device_kind} mathcing alises {aliases}. "
-            f"Avaiable labels from LabVIEW: {avaiable_labels}. "
-            f"Update the corresponding **Aliases Labels**."
-        )
-
-def print_available_labels(readings: dict[str, Any]) -> None:
-    print("Alicat Labels:", [str(get_field(item, "label", "")) for item in readings.get("alicat", [])])
-    print("Lambda Labels:", [str(get_field(item, "label", "")) for item in readings.get("lambda", [])])
-    print("Oscope Labels:", [str(get_field(item, "label", "")) for item in readings.get("oscope", [])])
+    return unpack_struct(payload, ThrustStandReadings)
