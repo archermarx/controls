@@ -21,7 +21,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     control_file = Path(args.file)
-    data_file = Path(args.data_file)
 
     client = controls.ThrusterController(
         args.cal_file,

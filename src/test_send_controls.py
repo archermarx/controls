@@ -19,12 +19,6 @@ parser.add_argument(
     help="How often, in seconds, to check for modifications to the command file",
 )
 parser.add_argument(
-    "--data-file",
-    "-d",
-    type=Path,
-    help="The file to which we write data received from LabVIEW. No data will be taken if this is empty",
-)
-parser.add_argument(
     "--dwell-time",
     "-t",
     type=int,
@@ -34,12 +28,10 @@ parser.add_argument(
 
 voltages = [1.0, 2.0, 3.0, 4.0, 5.0]
 
-
 if __name__ == "__main__":
     args = parser.parse_args()
 
     control_file = Path(args.file)
-    data_file = Path(args.data_file)
 
     server = controls.ThrusterController(
         args.cal_file,
