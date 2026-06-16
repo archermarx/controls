@@ -36,7 +36,6 @@ ControlType = Literal[
     "receive_control",
     "take_data",
     "send_data",
-    "receive_data",
 ]
 
 class ControlMetadata(BaseModel):
@@ -212,7 +211,6 @@ class ThrusterController:
             elif type == "take_data":
                 data = self.take_data(client, **payload)
                 self.send_command(control_file, "send_data", data)
-                self.wait_for_command(control_file, types=["receive_data"])
 
     def control_to(
             self,
@@ -405,7 +403,6 @@ class ThrusterController:
             data_args = dict(delay=delay, num_thrust_points=num_thrust_points, sources=sources)
             self.send_command(self.control_to_file, "take_data", data_args)
             _, data = self.wait_for_command(self.control_to_file, types=["send_data"])
-            self.send_command(self.control_to_file, "receive_data")
             return data
 
         if not sources: 

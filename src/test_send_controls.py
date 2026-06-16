@@ -2,7 +2,6 @@ import argparse
 import logging
 from pathlib import Path
 
-
 import lib.controls as controls
 from lib.labview import LabViewClient
 
@@ -52,4 +51,3 @@ if __name__ == "__main__":
             server.control_to(setpoint, client=labview_client)
             data = server.take_data(client=labview_client, num_thrust_points=20, delay=3, sources=['dmm'])
             print(f"Got data: {data}")
-
