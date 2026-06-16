@@ -83,19 +83,6 @@ def check_for_change(file: Path | str, counter, last_modified):
     else:
         return no_change_payload
 
-def wait_for_command(file, counter, last_modified, types: list[ControlType] | None = None, sleep_interval=0.1):
-    if types is None:
-        allowed_types = get_args(ControlType)
-    else:
-        allowed_types = types
-        
-    while True:
-        counter, type, last_modified, contents, changed = check_for_change(file, counter, last_modified)
-        if changed and type in allowed_types:
-            break
-        time.sleep(sleep_interval)
-
-    return counter + 1, type, last_modified, contents
 
 def time_str(s):
     if s >= 3600:
@@ -163,6 +150,24 @@ class ThrusterController:
         if self.control_to_file != "" and os.path.exists(self.control_to_file):
             self.control_counter = self.read_counter(self.control_to_file) + 1
 
+    def wait_for_command(self, file, types: list[ControlType] | None = None, sleep_interval=0.1):
+        if types is None:
+            allowed_types = get_args(ControlType)
+        else:
+            allowed_types = types
+            
+        while True:
+            counter, type, last_modified, contents, changed = check_for_change(
+                file, self.control_counter, self.control_last_modified
+            ) 
+            if changed and type in allowed_types:
+                break
+            time.sleep(sleep_interval)
+
+        self.control_counter = counter + 1
+        self.control_last_modified = last_modified
+        return type, contents
+
     def send_command(self, file, type, payload: dict | None = None):
         assert file != ""
 
@@ -177,10 +182,7 @@ class ThrusterController:
         self.control_counter += 1
 
     def read_data_file(self):
-        self.control_counter, _, self.control_last_modified, data = wait_for_command(
-            self.control_to_file, self.control_counter, self.control_last_modified,
-            types=["send_data"]
-        )
+        _, data = self.wait_for_command(self.control_to_file, types=["send_data"])
         print("Read data. Sending acknowledgement of receipt")
         self.send_command(self.control_to_file, "receive_data")
         return data
@@ -197,10 +199,7 @@ class ThrusterController:
         self.control_counter = self.read_counter(control_file)
 
         while True:
-            self.control_counter, type, self.control_last_modified, payload = wait_for_command(
-                control_file, self.control_counter, self.control_last_modified,
-                sleep_interval=sleep_interval,
-            )
+            type, payload = self.wait_for_command(control_file, sleep_interval=sleep_interval)
 
             if type == "set_control":
                 setpoint = ControlPoint.model_validate(payload)
@@ -216,9 +215,7 @@ class ThrusterController:
                 self.send_command(control_file, "send_data", data)
                 print(f"Data saved to {control_file}. Waiting for acknowledgement of receipt.")
 
-                self.control_counter, _, self.control_last_modified, _ = wait_for_command(
-                    control_file, self.control_counter, self.control_last_modified, types=["receive_data"]
-                )
+                self.wait_for_command(control_file, types=["receive_data"])
                 print(f"Received 'receive_data' command")
 
     def control_to(
@@ -234,10 +231,7 @@ class ThrusterController:
 
         if self.control_to_file != "":
             self.send_command(self.control_to_file, "set_control", self.setpoint.model_dump())
-
-            self.control_counter, _, self.control_last_modified, _ = wait_for_command(
-                self.control_to_file, self.control_counter, self.control_last_modified, types=["receive_control"],
-            )
+            self.wait_for_command(self.control_to_file, types=["receive_control"])
             print(f"Control received")
             return
 
