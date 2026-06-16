@@ -407,18 +407,6 @@ class ThrusterController:
     def take_data(self, client: LabViewClient, delay: int = 0, num_thrust_points=10, sources: list[str] | None = None):
         assert self.setpoint is not None
 
-        if self.control_to_file != "":
-            data_args = dict(delay=delay, num_thrust_points=num_thrust_points, sources=sources)
-            self.send_command(self.control_to_file, "take_data", data_args)
-            _, data = self.wait_for_command(self.control_to_file, types=["send_data"])
-            return data
-
-        if not sources: 
-            data_sources = set(["dmm", "magna", "alicat", "lambda", "oscope", "thruststand"])
-        else:
-            data_sources = set(sources)
-
-
         # Pause according to prescribed delay
         if delay > 0:
             line_len = len(status_str(delay))
@@ -427,6 +415,17 @@ class ThrusterController:
                 print(status_str(t), end="\r")
                 time.sleep(1)
         print("\nTaking data...")
+
+        if self.control_to_file != "":
+            data_args = dict(delay=0, num_thrust_points=num_thrust_points, sources=sources)
+            self.send_command(self.control_to_file, "take_data", data_args)
+            _, data = self.wait_for_command(self.control_to_file, types=["send_data"])
+            return data
+
+        if not sources: 
+            data_sources = set(["dmm", "magna", "alicat", "lambda", "oscope", "thruststand"])
+        else:
+            data_sources = set(sources)
 
         out = {}
         if client.dummy:
