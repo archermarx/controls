@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import os
 import time
 from pydantic import BaseModel, ValidationError
 from pathlib import Path
 import json
-from typing import Literal
 
 from dataclasses import asdict
 
@@ -70,7 +70,7 @@ def check_for_change(file: Path | str, cls, counter, last_modified):
 
     new_counter = contents.metadata.counter
     if new_counter > counter:
-        return new_counter, modified_time, contents.control, True
+        return new_counter, modified_time, contents.control if cls == ControlFile else contents.data, True
     else:
         return counter, last_modified, {}, False
 
@@ -146,6 +146,16 @@ class ThrusterController:
         self.data_last_modified = 0.0
         self.control_counter = 0
         self.data_counter = 0
+
+        # Check current counter in control file
+        if self.control_to_file is not None and os.path.exists(self.control_to_file):
+            contents = read_control_file(self.control_to_file, ControlFile)
+            self.control_counter = contents.metadata.counter + 1
+
+        # Check current counter in data file
+        if self.data_from_file is not None and os.path.exists(self.data_from_file):
+            contents = read_control_file(self.data_from_file, DataFile)
+            self.data_counter = contents.metadata.counter
 
     def write_control_file(self, setpoint: ControlPoint):
         assert self.control_to_file != ""
