@@ -154,6 +154,9 @@ class ThrusterController:
             allowed_types = get_args(ControlType)
         else:
             allowed_types = types
+
+        if self.verbose:
+            print(f"Waiting for command of type {allowed_types} (counter={self.control_counter})")
             
         while True:
             counter, type, last_modified, contents, changed = check_for_change(
@@ -162,7 +165,7 @@ class ThrusterController:
 
             if changed and type in allowed_types:
                 if self.verbose:
-                    print(f"Received command of type {type} (counter={self.control_counter})")
+                    print(f"Received command of type {type} (counter={counter})")
                 break
             time.sleep(sleep_interval)
 
