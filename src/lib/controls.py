@@ -413,7 +413,7 @@ class ThrusterController:
                 print(" "*line_len, end="\r")
                 print(status_str(t), end="\r")
                 time.sleep(1)
-        print("\nTaking data...")
+            print("\nTaking data...")
 
         if self.control_to_file != "":
             data_args = dict(delay=0, num_thrust_points=num_thrust_points, sources=sources)
