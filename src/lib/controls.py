@@ -147,7 +147,7 @@ class ThrusterController:
 
         # Check current counter in control file
         if self.control_to_file != "" and os.path.exists(self.control_to_file):
-            self.control_counter = self.read_counter(self.control_to_file) + 1
+            self.control_counter = self.read_counter(self.control_to_file)
 
     def wait_for_command(self, file, types: list[ControlType] | None = None, sleep_interval=0.1):
         if types is None:
@@ -170,6 +170,7 @@ class ThrusterController:
     def send_command(self, file, type, payload: dict | None = None):
         assert file != ""
 
+        self.control_counter += 1
         file_contents = ControlFile(
             metadata = ControlMetadata(counter=self.control_counter, type=type),
             payload=payload if payload else {}
@@ -179,7 +180,6 @@ class ThrusterController:
             json.dump(file_contents.model_dump(), fd, indent=4)
 
         self.control_last_modified = file.stat().st_mtime
-        self.control_counter += 1
 
     def read_data_file(self):
         _, data = self.wait_for_command(self.control_to_file, types=["send_data"])
@@ -230,9 +230,9 @@ class ThrusterController:
         self.setpoint = setpoint
 
         if self.control_to_file != "":
-            print(f"Controlling to setpoint {setpoint} (counter={self.control_counter}")
+            print(f"Controlling to setpoint {setpoint} (counter={self.control_counter})")
             self.send_command(self.control_to_file, "set_control", self.setpoint.model_dump())
-            print(f"Waiting for acknowledgement (counter={self.control_counter}")
+            print(f"Waiting for acknowledgement (counter={self.control_counter})")
             self.wait_for_command(self.control_to_file, types=["receive_control"])
             print(f"Control acknowledgement received (counter={self.control_counter}")
             return
