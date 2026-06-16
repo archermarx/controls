@@ -159,11 +159,15 @@ class ThrusterController:
             counter, type, last_modified, contents, changed = check_for_change(
                 file, self.control_counter, self.control_last_modified
             ) 
+
+            if self.verbose:
+                print(f"Received command of type {type} (counter={self.control_counter})")
+
             if changed and type in allowed_types:
                 break
             time.sleep(sleep_interval)
 
-        self.control_counter = counter + 1
+        self.control_counter = counter
         self.control_last_modified = last_modified
         return type, contents
 
@@ -181,11 +185,8 @@ class ThrusterController:
 
         self.control_last_modified = file.stat().st_mtime
 
-    def read_data_file(self):
-        _, data = self.wait_for_command(self.control_to_file, types=["send_data"])
-        print("Read data. Sending acknowledgement of receipt")
-        self.send_command(self.control_to_file, "receive_data")
-        return data
+        if self.verbose:
+            print(f"Send command of type {type} (counter={self.control_counter})")
 
     def start_listening(self,
             client: LabViewClient,
@@ -203,20 +204,13 @@ class ThrusterController:
 
             if type == "set_control":
                 setpoint = ControlPoint.model_validate(payload)
-                print(f"Received new control point: {setpoint}  (counter={self.control_counter})")
                 self.control_to(setpoint, client)
-
                 self.send_command(control_file, "receive_control")
-                print(f"Acknowledged control set  (counter={self.control_counter})")
 
             elif type == "take_data":
-                print(f"Recieved 'take data' command with args: {payload}  (counter={self.control_counter})")
                 data = self.take_data(client, **payload)
                 self.send_command(control_file, "send_data", data)
-                print(f"Data saved to {control_file}. Waiting for acknowledgement of receipt  (counter={self.control_counter})")
-
                 self.wait_for_command(control_file, types=["receive_data"])
-                print(f"Received 'receive_data' command (counter={self.control_counter})")
 
     def control_to(
             self,
@@ -230,11 +224,8 @@ class ThrusterController:
         self.setpoint = setpoint
 
         if self.control_to_file != "":
-            print(f"Controlling to setpoint {setpoint} (counter={self.control_counter})")
             self.send_command(self.control_to_file, "set_control", self.setpoint.model_dump())
-            print(f"Waiting for acknowledgement (counter={self.control_counter})")
             self.wait_for_command(self.control_to_file, types=["receive_control"])
-            print(f"Control acknowledgement received (counter={self.control_counter}")
             return
 
         anode_flow_rate_mg_s = setpoint.anode_mass_flow_rate_kg_s * 1e6
@@ -410,13 +401,10 @@ class ThrusterController:
 
         if self.control_to_file != "":
             data_args = dict(delay=delay, num_thrust_points=num_thrust_points, sources=sources)
-            # Send take data command
-            print("Sending take data command")
             self.send_command(self.control_to_file, "take_data", data_args)
-
-            # Await return of data
-            print("Awaiting data return")
-            return self.read_data_file()
+            _, data = self.wait_for_command(self.control_to_file, types=["send_data"])
+            self.send_command(self.control_to_file, "receive_data")
+            return data
 
         if not sources: 
             data_sources = set(["dmm", "magna", "alicat", "lambda", "oscope", "thruststand"])

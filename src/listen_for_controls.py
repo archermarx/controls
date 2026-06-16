@@ -19,6 +19,7 @@ if __name__ == "__main__":
     client = controls.ThrusterController(
         args.cal_file,
         propellant="Kr",
+        verbose=True,
     )
 
     with LabViewClient(dummy=True) as labview_client:
