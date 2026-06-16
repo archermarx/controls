@@ -179,7 +179,7 @@ class ThrusterController:
         )
         
         with open(file, "w") as fd:
-            json.dump(file_contents, fd, indent=4)
+            json.dump(file_contents.model_dump(), fd, indent=4)
 
         self.control_counter += 1
 
