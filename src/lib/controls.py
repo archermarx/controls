@@ -160,10 +160,9 @@ class ThrusterController:
                 file, self.control_counter, self.control_last_modified
             ) 
 
-            if self.verbose:
-                print(f"Received command of type {type} (counter={self.control_counter})")
-
             if changed and type in allowed_types:
+                if self.verbose:
+                    print(f"Received command of type {type} (counter={self.control_counter})")
                 break
             time.sleep(sleep_interval)
 
