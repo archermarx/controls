@@ -95,7 +95,7 @@ def wait_for_command(file, counter, last_modified, types: list[ControlType] | No
             break
         time.sleep(sleep_interval)
 
-    return counter, type, last_modified, contents
+    return counter + 1, type, last_modified, contents
 
 def time_str(s):
     if s >= 3600:
@@ -153,23 +153,15 @@ class ThrusterController:
         self.oscope_time_width = 10e-3
 
         # If control_to_file is defined, we write controls to the given path instead of directly commanding the thruster
-        # If data_from_file is defined, we wait to read data from the given file instead of directly taking it
         self.control_to_file = control_to_file
-        self.data_from_file = data_from_file
         self.control_last_modified = 0.0
-        self.data_last_modified = 0.0
         self.control_counter = 0
-        self.data_counter = 0
 
         self.read_counter = lambda f: read_control_file(f).metadata.counter
 
         # Check current counter in control file
         if self.control_to_file != "" and os.path.exists(self.control_to_file):
             self.control_counter = self.read_counter(self.control_to_file) + 1
-
-        # Check current counter in data file
-        if self.data_from_file != "" and os.path.exists(self.data_from_file):
-            self.data_counter = self.read_counter(self.data_from_file) + 1
 
     def send_command(self, file, type, payload: dict | None = None):
         assert file != ""
@@ -185,26 +177,17 @@ class ThrusterController:
         self.control_counter += 1
 
     def read_data_file(self):
-        assert self.data_from_file != ""
-
-        counter, type, last_modified, data = wait_for_command(
-            self.data_from_file, self.data_counter, self.data_last_modified,
+        self.control_counter, _, self.control_last_modified, data = wait_for_command(
+            self.control_to_file, self.control_counter, self.control_last_modified,
             types=["send_data"]
         )
-
-        assert type == "send_data"
-
-        self.data_counter = counter
-        self.data_last_modified = last_modified
-
-        assert self.control_to_file != ""
+        print("Read data. Sending acknowledgement of receipt")
         self.send_command(self.control_to_file, "receive_data")
         return data
 
     def start_listening(self,
             client: LabViewClient,
             control_file: Path,
-            data_file: Path,
             sleep_interval: float = 0.1,
         ):
 
@@ -212,7 +195,6 @@ class ThrusterController:
 
         # Read current counter from control and data files
         self.control_counter = self.read_counter(control_file)
-        self.data_counter = self.read_counter(data_file) + 1
 
         while True:
             self.control_counter, type, self.control_last_modified, payload = wait_for_command(
@@ -231,14 +213,8 @@ class ThrusterController:
             elif type == "take_data":
                 print(f"Recieved 'take data' command with args: {payload}")
                 data = self.take_data(client, **payload)
-                data_file_contents = ControlFile(
-                    metadata=ControlMetadata(counter=self.data_counter, type="send_data"),
-                    payload=data
-                )
-                self.data_counter += 1
-                with open(data_file, "w") as fd:
-                    json.dump(data_file_contents.model_dump(), fd, indent=4)
-                print(f"Data saved to {data_file}. Waiting for acknowledgement of receipt.")
+                self.send_command(control_file, "send_data", data)
+                print(f"Data saved to {control_file}. Waiting for acknowledgement of receipt.")
 
                 self.control_counter, _, self.control_last_modified, _ = wait_for_command(
                     control_file, self.control_counter, self.control_last_modified, types=["receive_data"]
@@ -437,20 +413,14 @@ class ThrusterController:
     def take_data(self, client: LabViewClient, delay: int = 0, num_thrust_points=10, sources: list[str] | None = None):
         assert self.setpoint is not None
 
-        if self.data_from_file != "":
+        if self.control_to_file != "":
             data_args = dict(delay=delay, num_thrust_points=num_thrust_points, sources=sources)
-
             # Send take data command
-            assert self.control_to_file != ""
-            self.control_counter += 1
-            file_contents = ControlFile(
-                metadata = ControlMetadata(counter = self.control_counter, type="take_data"),
-                payload = data_args,
-            )
-            with open(self.control_to_file, "w") as fd:
-                json.dump(file_contents.model_dump(), fd, indent=4)
+            print("Sending take data command")
+            self.send_command(self.control_to_file, "take_data", data_args)
 
             # Await return of data
+            print("Awaiting data return")
             return self.read_data_file()
 
         if not sources: 

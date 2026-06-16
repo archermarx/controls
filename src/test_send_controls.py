@@ -45,7 +45,6 @@ if __name__ == "__main__":
         args.cal_file,
         propellant="Kr",
         control_to_file=control_file,
-        data_from_file=data_file,
     )
 
     with LabViewClient(dummy=True) as labview_client:
