@@ -197,14 +197,14 @@ class ThrusterController:
             sleep_interval: float = 0.1,
         ):
 
-        # Read current counter from control and data files
-        self.control_counter = self.read_counter(control_file)
-
         # Create control file
         with open(control_file, "wb") as fd:
             metadata = ControlMetadata(counter=0, type="no_action")
             data = ControlFile(metadata=metadata, payload={})
             pickle.dump(data, file=fd)
+
+        # Read current counter from control and data files
+        self.control_counter = self.read_counter(control_file)
 
         print(f"Listening to file {control_file}  (counter={self.control_counter})")
 
