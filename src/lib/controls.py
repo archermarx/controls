@@ -43,6 +43,10 @@ class ControlMetadata(BaseModel):
     counter: int = 0
     type: ControlType = "no_action"
 
+class ControlFile(BaseModel):
+    metadata: ControlMetadata
+    payload: dict
+
 class ControlPoint(BaseModel):
     anode_mass_flow_rate_kg_s: float
     cathode_flow_fraction: float
@@ -50,9 +54,6 @@ class ControlPoint(BaseModel):
     magnetic_field_scale: float
     magnetic_field_scale_outer: float | None = None
 
-class ControlFile(BaseModel):
-    metadata: ControlMetadata
-    payload: dict
 
 def read_control_file(file):
     try:
@@ -62,24 +63,25 @@ def read_control_file(file):
         raise
 
 def check_for_change(file: Path | str, counter, last_modified):
+    no_change_payload = (counter, None, last_modified, {}, False)
     file = Path(file)
     if not file.exists():
-        return counter, None, last_modified, {}, False
+        return no_change_payload
 
     modified_time = file.stat().st_mtime
     if modified_time <= last_modified:
-        return counter, None, last_modified, {}, False
+        return no_change_payload
 
     try:
         contents = read_control_file(file)
     except (PermissionError, FileNotFoundError, ValidationError):
-        return counter, None, last_modified, {}, False
+        return no_change_payload
 
     new_counter = contents.metadata.counter
     if new_counter > counter:
         return new_counter, contents.metadata.type, modified_time, contents.payload, True
     else:
-        return counter, None, last_modified, {}, False
+        return no_change_payload
 
 def wait_for_command(file, counter, last_modified, types: list[ControlType] | None = None, sleep_interval=0.1):
     if types is None:
@@ -94,7 +96,6 @@ def wait_for_command(file, counter, last_modified, types: list[ControlType] | No
         time.sleep(sleep_interval)
 
     return counter, type, last_modified, contents
-
 
 def time_str(s):
     if s >= 3600:
@@ -242,6 +243,7 @@ class ThrusterController:
                 self.control_counter, _, self.control_last_modified, _ = wait_for_command(
                     control_file, self.control_counter, self.control_last_modified, types=["receive_data"]
                 )
+                self.control_counter += 1
                 print(f"Received 'receive_data' command")
 
     def control_to(
@@ -259,7 +261,7 @@ class ThrusterController:
             self.send_command(self.control_to_file, "set_control", self.setpoint.model_dump())
 
             self.control_counter, _, self.control_last_modified, _ = wait_for_command(
-                self.control_to_file, "receive_control", self.control_last_modified, types=["receive_control"],
+                self.control_to_file, self.control_counter, self.control_last_modified, types=["receive_control"],
             )
             print(f"Control received")
             return
