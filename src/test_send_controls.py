@@ -53,6 +53,7 @@ if __name__ == "__main__":
             data = server.take_data(client=labview_client, num_thrust_points=25, delay=5)
             print(f"Got data: keys = {list(data.keys())}")
 
-            waveform = labview.OscopeWaveform.from_dict(data["oscope"]["Anode Current"]["waveform"])
+            oscope = labview.OscopeReadings.from_dict(data["oscope"]["Anode Current"])
+            waveform = oscope.waveform
             t = waveform.time_values()
             print(f"Interval: {t[-1] - t[0]:.3g} s")

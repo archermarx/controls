@@ -285,6 +285,17 @@ class OscopeReadings:
     average: Annotated[float, F64]
     waveform: OscopeWaveform
 
+    @staticmethod
+    def from_dict(d):
+        return OscopeReadings(
+            label=d["label"],
+            peak_to_peak=d["peak_to_peak"],
+            rms=d["rms"],
+            average=d["average"],
+            waveform=OscopeWaveform.from_dict(d),
+        )
+
+
 @dataclass
 class PIDGain:
     Kp: Annotated[float, F64] 
