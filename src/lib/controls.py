@@ -4,6 +4,7 @@ import time
 from pydantic import BaseModel, ValidationError
 from pathlib import Path
 import json
+from typing import Literal
 
 from dataclasses import asdict
 
@@ -42,12 +43,45 @@ class ControlFile(BaseModel):
     metadata: ControlMetadata
     control: ControlPoint
 
-def read_control_file(file, logger):
+class DataFile(BaseModel):
+    metadata: ControlMetadata
+    data: dict
+
+def read_control_file(file, cls):
     try:
         with open(file, "r") as fd:
-            return ControlFile.model_validate_json(fd.read())
+            return cls.model_validate_json(fd.read())
     except ValidationError as e:
         raise
+
+def check_for_change(file: Path | str, cls, counter, last_modified):
+    file = Path(file)
+    if not file.exists():
+        return counter, last_modified, {}, False
+
+    modified_time = file.stat().st_mtime
+    if modified_time <= last_modified:
+        return counter, last_modified, {}, False
+
+    try:
+        contents = read_control_file(file, cls)
+    except (PermissionError, FileNotFoundError, ValidationError):
+        return counter, last_modified, {}, False
+
+    new_counter = contents.metadata.counter
+    if new_counter > counter:
+        return new_counter, modified_time, contents.control, True
+    else:
+        return counter, last_modified, {}, False
+
+def wait_for_change(file, cls, counter, last_modified, sleep_interval=0.1):
+    while True:
+        counter, last_modified, contents, changed = check_for_change(file, cls, counter, last_modified)
+        if changed:
+            break
+        time.sleep(sleep_interval)
+
+    return counter, last_modified, contents
 
 def time_str(s):
     if s >= 3600:
@@ -80,6 +114,8 @@ class ThrusterController:
             verbose: bool = False,
             voltage_range: tuple[float, float] = (0, 800),
             flow_range: tuple[float, float] = (0, 800),
+            control_to_file: str | Path = "",
+            data_from_file: str | Path = "",
         ):
         self.setpoint = None
         self.verbose = verbose
@@ -101,7 +137,69 @@ class ThrusterController:
 
         # Oscope ranges
         self.oscope_time_width = 10e-3
-    
+
+        # If control_to_file is defined, we write controls to the given path instead of directly commanding the thruster
+        # If data_from_file is defined, we wait to read data from the given file instead of directly taking it
+        self.control_to_file = control_to_file
+        self.data_from_file = data_from_file
+        self.control_last_modified = 0.0
+        self.data_last_modified = 0.0
+        self.control_counter = 0
+        self.data_counter = 0
+
+    def write_control_file(self, setpoint: ControlPoint):
+        assert self.control_to_file != ""
+
+        file_contents = ControlFile(
+            metadata = ControlMetadata(counter = self.control_counter),
+            control = setpoint,
+        )
+        with open(self.control_to_file, "w") as fd:
+            json.dump(file_contents.model_dump(), fd, indent=4)
+
+        self.control_counter += 1
+
+    def read_data_file(self):
+        assert self.data_from_file != ""
+
+        counter, last_modified, data = wait_for_change(
+            self.data_from_file, DataFile, self.data_counter, self.data_last_modified
+        )
+        self.data_counter = counter
+        self.data_last_modified = last_modified
+        return data
+
+    def start_listening(self,
+            client: LabViewClient,
+            control_file: Path,
+            data_file: Path,
+            sleep_interval: float = 0.1,
+            **data_args
+        ):
+
+        print(f"Listening to file {control_file}")
+
+        # Read current counter and last modified from control file
+        contents = read_control_file(control_file, ControlFile)
+        self.control_counter = contents.metadata.counter
+
+        while True:
+            self.control_counter, self.control_last_modified, setpoint = wait_for_change(
+                control_file, ControlFile, self.control_counter, self.control_last_modified,
+                sleep_interval=sleep_interval,
+            )
+            print(f"Received new control point: {setpoint}")
+            assert isinstance(setpoint, ControlPoint)
+            self.control_to(setpoint, client)
+
+            data = self.take_data(client, **data_args)
+            data_file_contents = DataFile(metadata=ControlMetadata(counter=self.data_counter), data=data)
+            self.data_counter += 1
+            with open(data_file, "w") as fd:
+                json.dump(data_file_contents.model_dump(), fd, indent=4)
+            
+            print(f"Data saved to {data_file}")
+
     def control_to(
             self,
             setpoint: ControlPoint,
@@ -110,7 +208,12 @@ class ThrusterController:
             set_alicats: bool = True,
             set_magna: bool = True,
             ):
+
         self.setpoint = setpoint
+
+        if self.control_to_file != "":
+            self.write_control_file(self.setpoint)
+            return
 
         anode_flow_rate_mg_s = setpoint.anode_mass_flow_rate_kg_s * 1e6
         anode_flow_rate_sccm = anode_flow_rate_mg_s * MGS_TO_SCCM[self.propellant]
@@ -178,6 +281,10 @@ class ThrusterController:
             enable=True
         )
         lambda_control = [inner_magnet, outer_magnet]
+
+        if client.dummy:
+            # Don't actually try and set controls if the client is set to dummy
+            return
 
         if set_magna:
             labview.set_magna_control(client, magna_control)
@@ -278,6 +385,9 @@ class ThrusterController:
 
     def take_data(self, client: LabViewClient, delay: int = 0, num_thrust_points=10, sources: list[str] | None = None):
         assert self.setpoint is not None
+
+        if self.data_from_file != "":
+            return self.read_data_file()
         
         if not sources: 
             data_sources = set(["dmm", "magna", "alicat", "lambda", "oscope", "thruststand"])
@@ -294,6 +404,9 @@ class ThrusterController:
         print("\nTaking data...")
 
         out = {}
+        if client.dummy:
+            return out
+
         if "dmm" in data_sources:
             out["dmm"] = asdict(labview.get_dmm_readings(client))
         if "magna" in data_sources:

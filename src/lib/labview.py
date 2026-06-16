@@ -598,9 +598,12 @@ class LabViewClient:
         return command_id, payload
     
     def request(self, command_id: int, payload: bytes = b"") -> bytes:
-        self.send_packet(command_id, payload)
-        _, response_payload = self.receive_packet(expected_command_id = command_id)
-        return response_payload
+        if not self.dummy:
+            self.send_packet(command_id, payload)
+            _, response_payload = self.receive_packet(expected_command_id = command_id)
+            return response_payload
+        else:
+            return b""
     
 # API Handling
 
