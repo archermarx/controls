@@ -49,5 +49,5 @@ if __name__ == "__main__":
             )
             print(f"Controlling to setpoint: {setpoint}")
             server.control_to(setpoint, client=labview_client)
-            data = server.take_data(client=labview_client, num_thrust_points=20, delay=3, sources=['dmm'])
-            print(f"Got data: {data}")
+            data = server.take_data(client=labview_client, num_thrust_points=25, delay=5)
+            print(f"Got data: keys = {list(data.keys())}")

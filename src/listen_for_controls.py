@@ -10,6 +10,8 @@ parser = argparse.ArgumentParser()
 parser.add_argument("file", type=Path, help="The path to the command file to monitor")
 parser.add_argument("--cal-file", "-c", type=Path, help="The path to the thruster calibration file")
 parser.add_argument("--sleep-interval", type=float, default=0.25, help="How often, in seconds, to check for modifications to the command file")
+parser.add_argument("--dummy", action="store_true")
+parser.add_argument("--verbose", action="store_true")
 
 if __name__ == "__main__":
     args = parser.parse_args()
@@ -19,10 +21,13 @@ if __name__ == "__main__":
     client = controls.ThrusterController(
         args.cal_file,
         propellant="Kr",
-        verbose=True,
+        verbose=args.verbose,
     )
 
-    with LabViewClient(dummy=True) as labview_client:
+    with LabViewClient(dummy=args.dummy) as labview_client:
+        if args.dummy:
+            print("Using dummy labview client")
+
         while True:
             client.start_listening(
                 labview_client,

@@ -314,7 +314,6 @@ class ThrusterController:
             labview.set_alicat_control(client, alicat_control)
 
         if set_lambdas:
-            print("Setting lambdas")
             labview.set_lambda_control(client, lambda_control)
             
         return DeviceCommands(magna_control, alicat_control, lambda_control)
