@@ -201,12 +201,28 @@ class OscopeAxis:
     increment: Annotated[float, F64]
     origin: Annotated[float, F64]
     reference: Annotated[int, U32]
+    
+    @staticmethod
+    def from_dict(d):
+        return OscopeAxis(
+            increment = d["increment"],
+            origin = d["origin"],
+            reference = d["reference"],
+        )
 
 @dataclass
 class OscopeWaveform:
     x: OscopeAxis
     y: OscopeAxis
     data: NDArray[np.uint8]
+
+    @staticmethod
+    def from_dict(d):
+        return OscopeWaveform(
+            x = OscopeAxis.from_dict(d["x"]),
+            y = OscopeAxis.from_dict(d["y"]),
+            data = d["data"],
+        )
 
     # Return physical x-axis values for each waveform point.
     # For Keysight-style waveform scaling: 
