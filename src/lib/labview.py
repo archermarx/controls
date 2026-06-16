@@ -292,7 +292,7 @@ class OscopeReadings:
             peak_to_peak=d["peak_to_peak"],
             rms=d["rms"],
             average=d["average"],
-            waveform=OscopeWaveform.from_dict(d),
+            waveform=OscopeWaveform.from_dict(d["waveform"]),
         )
 
 
