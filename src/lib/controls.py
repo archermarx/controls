@@ -9,6 +9,7 @@ import json
 from dataclasses import asdict
 
 import numpy as np
+from typing import Literal
 
 import lib.labview as labview
 from lib.labview import LabViewClient, MagnaControl, AlicatControl, LambdaControl, DeviceCommands
@@ -29,8 +30,11 @@ CURRENT_PER_FLOW = {
     "Ar": 15 / 7.0,
 }
 
+ControlType = Literal["no_action", "set_control", "take_data", "send_data"]
+
 class ControlMetadata(BaseModel):
     counter: int = 0
+    type: ControlType = "no_action"
 
 class ControlPoint(BaseModel):
     anode_mass_flow_rate_kg_s: float
@@ -41,47 +45,43 @@ class ControlPoint(BaseModel):
 
 class ControlFile(BaseModel):
     metadata: ControlMetadata
-    control: ControlPoint
+    payload: dict
 
-class DataFile(BaseModel):
-    metadata: ControlMetadata
-    data: dict
-
-def read_control_file(file, cls):
+def read_control_file(file):
     try:
         with open(file, "r") as fd:
-            return cls.model_validate_json(fd.read())
+            return ControlFile.model_validate_json(fd.read())
     except ValidationError as e:
         raise
 
-def check_for_change(file: Path | str, cls, counter, last_modified):
+def check_for_change(file: Path | str, counter, last_modified):
     file = Path(file)
     if not file.exists():
-        return counter, last_modified, {}, False
+        return counter, None, last_modified, {}, False
 
     modified_time = file.stat().st_mtime
     if modified_time <= last_modified:
-        return counter, last_modified, {}, False
+        return counter, None, last_modified, {}, False
 
     try:
-        contents = read_control_file(file, cls)
+        contents = read_control_file(file)
     except (PermissionError, FileNotFoundError, ValidationError):
-        return counter, last_modified, {}, False
+        return counter, None, last_modified, {}, False
 
     new_counter = contents.metadata.counter
     if new_counter > counter:
-        return new_counter, modified_time, contents.control if cls == ControlFile else contents.data, True
+        return new_counter, contents.metadata.type, modified_time, contents.payload, True
     else:
-        return counter, last_modified, {}, False
+        return counter, None, last_modified, {}, False
 
-def wait_for_change(file, cls, counter, last_modified, sleep_interval=0.1):
+def wait_for_change(file, counter, last_modified, sleep_interval=0.1):
     while True:
-        counter, last_modified, contents, changed = check_for_change(file, cls, counter, last_modified)
+        counter, type, last_modified, contents, changed = check_for_change(file, counter, last_modified)
         if changed:
             break
         time.sleep(sleep_interval)
 
-    return counter, last_modified, contents
+    return counter, type, last_modified, contents
 
 def time_str(s):
     if s >= 3600:
@@ -147,22 +147,22 @@ class ThrusterController:
         self.control_counter = 0
         self.data_counter = 0
 
+        self.read_counter = lambda f: read_control_file(f).metadata.counter
+
         # Check current counter in control file
-        if self.control_to_file is not None and os.path.exists(self.control_to_file):
-            contents = read_control_file(self.control_to_file, ControlFile)
-            self.control_counter = contents.metadata.counter + 1
+        if self.control_to_file != "" and os.path.exists(self.control_to_file):
+            self.control_counter = self.read_counter(self.control_to_file) + 1
 
         # Check current counter in data file
-        if self.data_from_file is not None and os.path.exists(self.data_from_file):
-            contents = read_control_file(self.data_from_file, DataFile)
-            self.data_counter = contents.metadata.counter
+        if self.data_from_file != "" and os.path.exists(self.data_from_file):
+            self.data_counter = self.read_counter(self.data_from_file) + 1
 
     def write_control_file(self, setpoint: ControlPoint):
         assert self.control_to_file != ""
 
         file_contents = ControlFile(
-            metadata = ControlMetadata(counter = self.control_counter),
-            control = setpoint,
+            metadata = ControlMetadata(counter = self.control_counter, type="set_control"),
+            payload = setpoint.model_dump(),
         )
         with open(self.control_to_file, "w") as fd:
             json.dump(file_contents.model_dump(), fd, indent=4)
@@ -171,10 +171,13 @@ class ThrusterController:
 
     def read_data_file(self):
         assert self.data_from_file != ""
+        type = ""
 
-        counter, last_modified, data = wait_for_change(
-            self.data_from_file, DataFile, self.data_counter, self.data_last_modified
-        )
+        while type != "send_data":
+            counter, type, last_modified, data = wait_for_change(
+                self.data_from_file, self.data_counter, self.data_last_modified
+            )
+
         self.data_counter = counter
         self.data_last_modified = last_modified
         return data
@@ -184,31 +187,36 @@ class ThrusterController:
             control_file: Path,
             data_file: Path,
             sleep_interval: float = 0.1,
-            **data_args
         ):
 
         print(f"Listening to file {control_file}")
 
-        # Read current counter and last modified from control file
-        contents = read_control_file(control_file, ControlFile)
-        self.control_counter = contents.metadata.counter
+        # Read current counter from control and data files
+        self.control_counter = self.read_counter(control_file)
+        self.data_counter = self.read_counter(data_file) + 1
 
         while True:
-            self.control_counter, self.control_last_modified, setpoint = wait_for_change(
-                control_file, ControlFile, self.control_counter, self.control_last_modified,
+            self.control_counter, type, self.control_last_modified, payload = wait_for_change(
+                control_file, self.control_counter, self.control_last_modified,
                 sleep_interval=sleep_interval,
             )
-            print(f"Received new control point: {setpoint}")
-            assert isinstance(setpoint, ControlPoint)
-            self.control_to(setpoint, client)
 
-            data = self.take_data(client, **data_args)
-            data_file_contents = DataFile(metadata=ControlMetadata(counter=self.data_counter), data=data)
-            self.data_counter += 1
-            with open(data_file, "w") as fd:
-                json.dump(data_file_contents.model_dump(), fd, indent=4)
-            
-            print(f"Data saved to {data_file}")
+            if type == "set_control":
+                setpoint = ControlPoint.model_validate(payload)
+                print(f"Received new control point: {setpoint}")
+                self.control_to(setpoint, client)
+
+            elif type == "take_data":
+                print(f"Recieved 'take data' command with args: {payload}")
+                data = self.take_data(client, **payload)
+                data_file_contents = ControlFile(
+                    metadata=ControlMetadata(counter=self.data_counter, type="send_data"),
+                    payload=data
+                )
+                self.data_counter += 1
+                with open(data_file, "w") as fd:
+                    json.dump(data_file_contents.model_dump(), fd, indent=4)
+                print(f"Data saved to {data_file}")
 
     def control_to(
             self,

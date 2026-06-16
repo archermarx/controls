@@ -31,9 +31,9 @@ if __name__ == "__main__":
     )
 
     with LabViewClient(dummy=True) as labview_client:
-        client.start_listening(
-            labview_client,
-            control_file, data_file,
-            sleep_interval=args.sleep_interval, 
-            delay=args.dwell_time
-        )
+        while True:
+            client.start_listening(
+                labview_client,
+                control_file, data_file,
+                sleep_interval=args.sleep_interval, 
+            )
