@@ -5,6 +5,7 @@ import time
 from pydantic import BaseModel, ValidationError
 from pathlib import Path
 import json
+import pickle
 
 from dataclasses import asdict
 
@@ -56,8 +57,9 @@ class ControlPoint(BaseModel):
 
 def read_control_file(file):
     try:
-        with open(file, "r") as fd:
-            return ControlFile.model_validate_json(fd.read())
+        with open(file, "rb") as fd:
+            contents = pickle.load(fd)
+        return ControlFile.model_validate(contents)
     except ValidationError as e:
         raise
 
@@ -181,8 +183,8 @@ class ThrusterController:
             payload=payload if payload else {}
         )
         
-        with open(file, "w") as fd:
-            json.dump(file_contents.model_dump(), fd, indent=4)
+        with open(file, "wb") as fd:
+            pickle.dump(file_contents.model_dump(), fd)
 
         self.control_last_modified = file.stat().st_mtime
 
@@ -197,6 +199,12 @@ class ThrusterController:
 
         # Read current counter from control and data files
         self.control_counter = self.read_counter(control_file)
+
+        # Create control file
+        with open(control_file, "wb") as fd:
+            metadata = ControlMetadata(counter=0, type="no_action")
+            data = ControlFile(metadata=metadata, payload={})
+            pickle.dump(data, file=fd)
 
         print(f"Listening to file {control_file}  (counter={self.control_counter})")
 
