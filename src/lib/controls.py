@@ -219,7 +219,6 @@ class ThrusterController:
                 self.control_counter, _, self.control_last_modified, _ = wait_for_command(
                     control_file, self.control_counter, self.control_last_modified, types=["receive_data"]
                 )
-                self.control_counter += 1
                 print(f"Received 'receive_data' command")
 
     def control_to(
