@@ -193,10 +193,10 @@ class ThrusterController:
             sleep_interval: float = 0.1,
         ):
 
-        print(f"Listening to file {control_file}  (counter={self.control_counter})")
-
         # Read current counter from control and data files
         self.control_counter = self.read_counter(control_file)
+
+        print(f"Listening to file {control_file}  (counter={self.control_counter})")
 
         while True:
             type, payload = self.wait_for_command(control_file, sleep_interval=sleep_interval)
@@ -206,8 +206,8 @@ class ThrusterController:
                 print(f"Received new control point: {setpoint}  (counter={self.control_counter})")
                 self.control_to(setpoint, client)
 
-                print(f"Acknowledging control set  (counter={self.control_counter})")
                 self.send_command(control_file, "receive_control")
+                print(f"Acknowledged control set  (counter={self.control_counter})")
 
             elif type == "take_data":
                 print(f"Recieved 'take data' command with args: {payload}  (counter={self.control_counter})")
@@ -230,6 +230,7 @@ class ThrusterController:
         self.setpoint = setpoint
 
         if self.control_to_file != "":
+            print(f"Controlling to setpoint {setpoint} (counter={self.control_counter}")
             self.send_command(self.control_to_file, "set_control", self.setpoint.model_dump())
             print(f"Waiting for acknowledgement (counter={self.control_counter}")
             self.wait_for_command(self.control_to_file, types=["receive_control"])
