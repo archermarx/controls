@@ -405,12 +405,26 @@ class ThrusterController:
         assert self.setpoint is not None
 
         if self.data_from_file != "":
+            data_args = dict(delay=delay, num_thrust_points=num_thrust_points, sources=sources)
+
+            # Send take data command
+            assert self.control_to_file != ""
+            self.control_counter += 1
+            file_contents = ControlFile(
+                metadata = ControlMetadata(counter = self.control_counter, type="take_data"),
+                payload = data_args,
+            )
+            with open(self.control_to_file, "w") as fd:
+                json.dump(file_contents.model_dump(), fd, indent=4)
+
+            # Await return of data
             return self.read_data_file()
-        
+
         if not sources: 
             data_sources = set(["dmm", "magna", "alicat", "lambda", "oscope", "thruststand"])
         else:
             data_sources = set(sources)
+
 
         # Pause according to prescribed delay
         if delay > 0:
