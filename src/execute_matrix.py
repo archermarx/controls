@@ -22,7 +22,7 @@ parser.add_argument("--dwell-time", "-t", type=int, default=5, help="How long (i
 parser.add_argument("--host-ip", type=str, default=labview.LABVIEW_IP, help="The IP address of the LabVIEW client")
 parser.add_argument("--port", type=int, default=labview.LABVIEW_PORT, help="The port of the LabVIEW client")
 parser.add_argument("--interactive", "-i", action="store_true", help="Whether to ask the user before proceeding to the next control point")
-parser.add_argument("--remote-file", type=str, help="Remote control file to use. Optional.", default="")
+parser.add_argument("--remote-file", "-f", type=str, help="Remote control file to use. Optional.", default="")
 
 def num_digits(n):
     if n > 0:
@@ -72,7 +72,7 @@ def main(args):
 
     starting_point = None
 
-    dummy = args.remote_file == ""
+    dummy = args.remote_file != ""
     with labview.LabViewClient(host=args.host_ip, port=args.port, dummy=dummy) as client:
         for (i, (mdot, vd, cff, bmag)) in enumerate(zip(flow_rates, discharge_voltages, cathode_flow_fractions, magnetic_field_strengths)):
             

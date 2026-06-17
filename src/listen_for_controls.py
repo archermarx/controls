@@ -21,7 +21,7 @@ if __name__ == "__main__":
 
     client = controls.ThrusterController(
         args.cal_file,
-        propellant="Kr",
+        propellant=args.gas,
         verbose=args.verbose,
     )
 
