@@ -61,7 +61,7 @@ def main(args):
         args.cal_file,
         propellant=args.gas, 
         verbose=args.verbose,
-        control_to_file=Path(args.remote_file)
+        control_to_file=args.remote_file
     )
     output_dir = Path(args.output)
     os.makedirs(output_dir, exist_ok=True)

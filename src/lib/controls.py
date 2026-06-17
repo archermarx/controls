@@ -417,12 +417,12 @@ class ThrusterController:
         # The oscope has 8-bit depth so we want to ensure we get maximum resolution when we get waveforms
         # This requires that we rescale things on the fly
         # Note: the keys are hard-coded here. We shouldn't do this.
-        vd = 300
+        assert self.setpoint is not None
         id = 50
         variable_settings = {
             "Anode Current": dict(offset=id/2, range=id),
             "Cathode Current": dict(offset=id/2, range=id),
-            "Discharge Voltage": dict(offset=vd, range=vd),
+            "Discharge Voltage": dict(offset=self.setpoint.discharge_voltage_v, range=self.setpoint.discharge_voltage_v),
             "C2G Voltage": dict(offset=-18, range=40),
         }
         channels = [

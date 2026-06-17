@@ -20,22 +20,17 @@ controller = controls.ThrusterController(args.cal_file, propellant=args.gas)
 with labview.LabViewClient() as client:
     controller.control_to(setpoint, client)
 
-    # currents = []
-    # data = controller.take_data(client, delay=10, sources=["dmm"])
-    # currents.append(data["dmm"]["current"])
+    currents = []
+    data = controller.take_data(client, delay=10, sources=["dmm"])
+    currents.append(data["dmm"]["current"])
 
-    # for i in range(50):
-    #     data = controller.take_data(client, delay=0, sources=["dmm"])
-    #     currents.append(data["dmm"]["current"])
-    #     print(f"Current: {currents[-1]:.3f} A")
-    #     time.sleep(0.1)
+    for i in range(10):
+        data = controller.take_data(client, delay=0, sources=["dmm"])
+        currents.append(data["dmm"]["current"])
+        print(f"Current: {currents[-1]:.3f} A")
+        time.sleep(0.1)
 
-    # mean_current = np.mean(currents)
-    # std_current = np.std(currents)
+    mean_current = np.mean(currents)
+    std_current = np.std(currents)
 
-    #print(f"Final current: {mean_current:.3f} +/- {2*std_current:.3f} A")
-
-    # thrust = controller.take_thrust_shutoff(client, num_avg_pts=10, settle_time=30, relight_time=5)
-    # shunt = float(thrust["shunt"])
-    # thrust_mN = float(thrust["thrust_mN"])
-    # print(f"{shunt=}, {thrust_mN=}")
+    print(f"Final current: {mean_current:.3f} +/- {2*std_current:.3f} A")

@@ -276,9 +276,14 @@ def main(args):
                     fig, axs = plt.subplots(2,1, layout='constrained', figsize=(6,6))
                     surrogate.plot_1d_on_axis(axs[1])
                     x = np.linspace(lb[0], ub[0], 100)
-                    ei = [surrogate.expected_improvement([_x]) for _x in x]
-                    axs[0].plot(x, ei, color = 'red')
-                    axs[0].set(title="Expected improvement", xticklabels = [], xlim=(lb, ub))
+                    if surrogate.acquisition == "ei":
+                        ei = [surrogate.expected_improvement([_x]) for _x in x]
+                        axs[0].plot(x, ei, color = 'red')
+                        axs[0].set(title="Expected improvement", xticklabels = [], xlim=(lb, ub))
+                    elif surrogate.acquisition == "eig":
+                        ei = [surrogate.expected_information_gain([_x]) for _x in x]
+                        axs[0].plot(x, ei, color = 'red')
+                        axs[0].set(title="Expected information gain", xticklabels = [], xlim=(lb, ub))
 
                     fig.savefig("surrogate.png")
                     plt.close(fig)
@@ -287,7 +292,9 @@ def main(args):
                         "variable_name": control_vars,
                         "metric_name": args.objective,
                     }
-                    plot_surrogate(surrogate, metadata, step_num, output_dir)
+                    plot_dir = Path(output_dir) / "plots"
+                    os.makedirs(plot_dir, exist_ok=True)
+                    plot_surrogate(surrogate, metadata, step_num, plot_dir)
 
             sample = {
                 "step": {step_num},
