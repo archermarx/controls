@@ -13,7 +13,6 @@ class Surrogate:
         optimize_restarts=10,
         acquisition="ei",
         noise_floor=1e-3,
-        seed=None,
     ):
         self.lb, self.ub = np.array(bounds[0]), np.array(bounds[1])
         if len(self.ub) != len(self.lb):
@@ -31,8 +30,6 @@ class Surrogate:
         self.acquisition = acquisition
         self.noise_floor = noise_floor
 
-        self.rng = np.random.default_rng(seed)
-
         self.X = np.zeros((0, 2))
         self.Y = np.zeros(0)
 
@@ -41,7 +38,32 @@ class Surrogate:
 
         self.best_x = np.zeros(self.dim)
         self.best_y = np.inf
-        self.history = []
+
+    def to_dict(self):
+        return {
+            "X": self.X,
+            "Y": self.Y,
+            "acquisition": self.acquisition,
+            "optimize_restarts": self.optimize_restarts,
+            "kernel": self.kernel,
+            "lb": self.lb,
+            "ub": self.ub,
+            "noise_floor": self.noise_floor,
+            "optimal_theta": self.model.optimal_theta if self.model else None,
+            "optimal_noise": self.model.optimal_noise if self.model else None
+        }
+
+    @staticmethod
+    def from_dict(d):
+        surr = Surrogate(
+            bounds = (d["lb"], d["lb"]),
+            kernel = d["kernel"],
+            optimize_restarts=d["optimize_restarts"],
+            acquisition = d["acquisition"],
+            noise_floor = d["noise_floor"],
+        )
+        surr.update(d["X"], d["Y"])
+        return surr
 
     def __call__(self, x) -> float:
         assert self.model is not None
@@ -274,6 +296,7 @@ class Surrogate:
             raise ValueError(f"Expected dimension {self.dim}, got {x.size}")
 
         return x
+    
     
     def plot_1d_on_axis(
         self,

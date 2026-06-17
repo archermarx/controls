@@ -318,7 +318,75 @@ class ThrusterController:
             
         return DeviceCommands(magna_control, alicat_control, lambda_control)
 
-    def take_thrust(self, client, num_avg_pts=10, reset_calibration=False):
+    def calc_thrust(self, s, s0):
+        cal = self.cal["thrust_stand"]
+        m = cal["slope"]
+        b = cal["intercept"]
+        return {"shunt": s, "thrust_mN": m * (s - s0) + b}
+
+    def take_thrust_shutoff(self, client, num_avg_pts=10, settle_time=30, relight_time=5):
+        assert self.setpoint is not None
+
+        dmm = labview.get_dmm_readings(client)
+        current_before = dmm.current
+
+        mdot = self.setpoint.anode_mass_flow_rate_kg_s
+        cff = self.setpoint.cathode_flow_fraction
+        vd = self.setpoint.discharge_voltage_v
+        b_scale = self.setpoint.magnetic_field_scale
+        b_outer = self.setpoint.magnetic_field_scale_outer
+
+        # Shut off mass flow and discharge_voltage
+        off_pt = ControlPoint(
+            anode_mass_flow_rate_kg_s=0.0,
+            cathode_flow_fraction=cff,
+            discharge_voltage_v=0.0,
+            magnetic_field_scale=b_scale,
+            magnetic_field_scale_outer=b_outer,
+        )
+
+        # Relight at higher CFF
+        relight_pt = ControlPoint(
+            anode_mass_flow_rate_kg_s=mdot,
+            cathode_flow_fraction=0.15,
+            discharge_voltage_v=vd,
+            magnetic_field_scale=b_scale,
+            magnetic_field_scale_outer=b_outer
+        )
+
+        # Base setpoint
+        on_pt = self.setpoint
+
+        thrust_before = self.take_thrust(client, num_avg_pts=num_avg_pts)
+        self.control_to(off_pt, client)
+
+        print(f"Sleeping for {settle_time} s")
+        time.sleep(settle_time)
+
+        thrust_after = self.take_thrust(client, num_avg_pts, reset_null_shunt=True)
+        print(f"Relighting")
+        self.control_to(relight_pt, client)
+
+        print(f"Sleeping for {relight_time} seconds")
+        time.sleep(relight_time)
+
+        dmm = labview.get_dmm_readings(client)
+        current_after = dmm.current
+        print(f"Current: before={current_before:.3f} A, after={current_after:.3f} A") 
+        if current_after < 0.5 * current_before:
+            self.control_to(off_pt, client)
+            raise ValueError("Thruster failed to relight! Turning off flow and voltage and aborting")
+
+        print(f"Returning to original setpoint")
+        self.control_to(on_pt, client)
+
+        s0 = thrust_after["shunt"]
+        s = thrust_before["shunt"]
+
+        return self.calc_thrust(s, s0)
+
+    def take_thrust(self, client, num_avg_pts=10, reset_null_shunt=False):
+
         config = labview.ThrustStandConfig(
             num_points = num_avg_pts,
             gains = labview.PIDGain(
@@ -332,18 +400,15 @@ class ThrusterController:
         readings = labview.get_thruststand_readings(client)
         shunt = np.mean(readings.shunt)
 
-        if reset_calibration:
+        if reset_null_shunt:
             self.cal["thrust_stand"]["shunt_at_setpoint"] = shunt
             with open(self.cal_file, "w") as fd:
                 print("Updated calibration")
                 json.dump({"magnet_currents_A": self.magnet_currents, "calibration": self.cal}, fd, indent=4)
 
-        cal = self.cal["thrust_stand"]
         s_mean = np.mean(shunt)
-        s0 = cal["shunt_at_setpoint"]
-        m = cal["slope"]
-        b = cal["intercept"]
-        return {"shunt": s_mean, "thrust_N": m * (s_mean - s0) + b}
+        s0 = self.cal["thrust_stand"]["shunt_at_setpoint"]
+        return self.calc_thrust(s_mean, s0)
 
     def take_oscope(self, client: LabViewClient):
         # O-scope time base

@@ -27,7 +27,6 @@ parser.add_argument("--verbose", "-v", action="store_true")
 
 parser.add_argument("--optimize-restarts", type=int, default=25)
 parser.add_argument("--acquisition", type=str, choices=["ei", "mean"], default="ei")
-parser.add_argument("--seed", type=int, default=1)
 
 parser.add_argument("--max-current-offset-A", type=float, default=2.0)
 parser.add_argument("--max-current-offset-frac", type=float, default=0.25)
@@ -150,7 +149,6 @@ def main(args):
         bounds=bounds,
         optimize_restarts=args.optimize_restarts,
         acquisition=args.acquisition,
-        seed=args.seed,
     )
 
     controller = controls.ThrusterController(
