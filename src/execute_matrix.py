@@ -13,7 +13,7 @@ import lib.labview as labview
 parser = argparse.ArgumentParser()
 parser.add_argument("test_matrix", type=Path, help="CSV file containing test points")
 parser.add_argument("--cal-file", "-c", type=Path, help="The path to the thruster calibration file")
-parser.add_argument("--data", "-d", type=lambda s: s.split(","), help="Comma-separated list of data types to collect. Choices are 'magna', 'alicat', 'lambda', 'dmm', and 'oscope'. Defaults to writing all.")
+parser.add_argument("--data", "-d", type=lambda s: s.split(","), help="Comma-separated list of data types to collect. Choices are 'magna', 'alicat', 'lambda', 'dmm', 'oscope', and 'thruststand'. Defaults to taking all.")
 parser.add_argument("--output", "-o", type=Path, default=Path("."), help="Folder in which data will be written. Will be created if it does not already exist.")
 parser.add_argument("--prefix", "-p", type=str, default="data", help="Prefix to append to data files.")
 parser.add_argument("--gas", "-g", type=str, choices=["Xe", "Kr", "Ar"], default="Kr", help="Propellant gas being used. One of 'Xe', 'Kr', or 'Ar'. Defaults to 'Kr'.")
@@ -22,7 +22,6 @@ parser.add_argument("--dwell-time", "-t", type=int, default=5, help="How long (i
 parser.add_argument("--host-ip", type=str, default=labview.LABVIEW_IP, help="The IP address of the LabVIEW client")
 parser.add_argument("--port", type=int, default=labview.LABVIEW_PORT, help="The port of the LabVIEW client")
 parser.add_argument("--interactive", "-i", action="store_true", help="Whether to ask the user before proceeding to the next control point")
-parser.add_argument("--setpoint", "-s", type=str, required=True, help="Setpoint file, used to read normalization info")
 
 def num_digits(n):
     if n > 0:
@@ -48,9 +47,6 @@ def compute_rms_amplitude(data):
     return rms_current
 
 def main(args):
-    with open(args.setpoint, "rb") as fd:
-        base_setpoint = controls.ControlPoint.model_validate_json(fd.read())
-    
     prefix = "" if not args.prefix else args.prefix + "_"
     data_types = ["magna", "dmm", "alicat", "lambda", "oscope"] if args.data is None else args.data
 
@@ -89,7 +85,7 @@ def main(args):
 
             if "dmm" in data_types and "oscope" in data_types:
                 avg_current = data["dmm"]["current"]
-                p2p_current = data["oscope"]["Anode Current"].peak_to_peak
+                p2p_current = data["oscope"]["Anode Current"]["peak_to_peak"]
                 print(f"Average current: {avg_current:.3f} A (p2p = {p2p_current:.3f})")
 
             out_file = output_dir / filename_format.format(i+1)

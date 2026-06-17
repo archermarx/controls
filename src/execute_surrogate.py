@@ -10,6 +10,8 @@ import lib.controls as controls
 import lib.labview as labview
 from lib.surrogate import Surrogate
 
+from analyze_surrogate import plot_surrogate
+
 parser = argparse.ArgumentParser()
 
 parser.add_argument("--cal-file", "-c", type=Path, help="The path to the thruster calibration file")
@@ -26,7 +28,7 @@ parser.add_argument("--port", type=int, default=labview.LABVIEW_PORT)
 parser.add_argument("--verbose", "-v", action="store_true")
 
 parser.add_argument("--optimize-restarts", type=int, default=25)
-parser.add_argument("--acquisition", type=str, choices=["ei", "mean"], default="ei")
+parser.add_argument("--acquisition", type=str, choices=["ei", "eig", "mean"], default="ei")
 
 parser.add_argument("--max-current-offset-A", type=float, default=2.0)
 parser.add_argument("--max-current-offset-frac", type=float, default=0.25)
@@ -68,8 +70,22 @@ def compute_efficiency(data, setpoint: controls.ControlPoint):
     vd = setpoint.discharge_voltage_v
     return 0.5 * thrust_N**2 / mdot / vd / current_A
 
+def thrust_to_power(data, setpoint: controls.ControlPoint):
+    dmm: dict = data["dmm"]
+    vd = setpoint.discharge_voltage_v
+    dmm: dict = data["dmm"]
+    thrust_mN: float = data["thrust"]["thrust_mN"]
+    thrust_N = thrust_mN / 1000
+    current_A = dmm["current"]
+    vd = setpoint.discharge_voltage_v
+    power_kW = vd * current_A
+    return thrust_N / power_kW
+
 def efficiency_obj(data, setpoint):
     return (1 - compute_efficiency(data, setpoint))
+    
+def thrust_to_power_obj(data, setpoint: controls.ControlPoint):
+    return -thrust_to_power(data, setpoint)
 
 def parse_control_vars(text):
     return [x.strip() for x in text.split(",") if x.strip()]
@@ -137,6 +153,8 @@ def main(args):
         metric_fn = rms_amplitude_pct
     elif args.objective == "efficiency":
         metric_fn = efficiency_obj
+    elif args.objective == "thrust_to_power":
+        metric_fn = thrust_to_power_obj
 
     lb, ub = [b[0] for b in bounds], [b[1] for b in bounds]
 
@@ -264,6 +282,12 @@ def main(args):
 
                     fig.savefig("surrogate.png")
                     plt.close(fig)
+                elif dim == 2:
+                    metadata = {
+                        "variable_name": control_vars,
+                        "metric_name": args.objective,
+                    }
+                    plot_surrogate(surrogate, metadata, step_num, output_dir)
 
             sample = {
                 "step": {step_num},

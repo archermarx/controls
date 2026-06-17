@@ -54,7 +54,6 @@ class ControlPoint(BaseModel):
     magnetic_field_scale: float
     magnetic_field_scale_outer: float | None = None
 
-
 def read_control_file(file):
     try:
         with open(file, "rb") as fd:
@@ -84,7 +83,6 @@ def check_for_change(file: Path | str, counter, last_modified):
     else:
         return no_change_payload
 
-
 def time_str(s):
     if s >= 3600:
         h = s // 3600
@@ -98,8 +96,13 @@ def time_str(s):
     else:
         return f"{s} s"
 
-def status_str(t):
-    return f"Waiting to take data. Time remaining: " + time_str(t) + "."
+def countdown(total, status_fn):
+    line_len = len(status_fn(total))
+    for t in range(total, 0, -1):
+        print(" "*line_len, end="\r")
+        print(status_fn(t), end="\r")
+        time.sleep(1)
+    print("\n")
 
 def calibrate(val, cal):
     return val * cal[0] + cal[1]
@@ -220,71 +223,32 @@ class ThrusterController:
                 data = self.take_data(client, **payload)
                 self.send_command(control_file, "send_data", data)
 
-    def control_to(
-            self,
-            setpoint: ControlPoint,
-            client: LabViewClient,
-            set_lambdas: bool = True,
-            set_alicats: bool = True,
-            set_magna: bool = True,
-            ):
+    def kgs_to_sccm(self, kgs):
+        return kgs * 1e6 * MGS_TO_SCCM[self.propellant]
 
-        self.setpoint = setpoint
-
-        if self.control_to_file != "":
-            self.send_command(self.control_to_file, "set_control", self.setpoint.model_dump())
-            self.wait_for_command(self.control_to_file, types=["receive_control"])
-            return
-
-        anode_flow_rate_mg_s = setpoint.anode_mass_flow_rate_kg_s * 1e6
-        anode_flow_rate_sccm = anode_flow_rate_mg_s * MGS_TO_SCCM[self.propellant]
-        cathode_flow_rate_sccm = anode_flow_rate_sccm * setpoint.cathode_flow_fraction
-
-        MAX_CURRENT = 100
-
-        # Calculate the expected current so we can set appropriate current limits
-        expected_current = anode_flow_rate_mg_s * CURRENT_PER_FLOW[self.propellant]
-        overcurrent = min(3 * expected_current, MAX_CURRENT)
-        current_limit = 1.25 * overcurrent
-        overvoltage = 1000
-        self.current_limit = current_limit
-
-        # Set the power supply
-        magna_control = MagnaControl(
-            voltage_limit=apply_limits(
-                calibrate(setpoint.discharge_voltage_v, self.cal["voltage"]),
-                self.voltage_range
-            ),
-            overcurrent_trip=75,
-            current_limit=100,
-            overvoltage_trip=overvoltage,
-            enable=True,
-        )
-
+    def set_flow(self, client, anode_sccm, cathode_sccm):
         # Set the flow controllers
         anode_flow_control = AlicatControl(
             label="anode",
             setpoint=apply_limits(
-                calibrate(anode_flow_rate_sccm, self.cal["anode_flow"]),
+                calibrate(anode_sccm, self.cal["anode_flow"]),
                 self.flow_range
             ),
         )
         cathode_flow_control = AlicatControl(
             label="cathode",
             setpoint=apply_limits(
-                calibrate(cathode_flow_rate_sccm, self.cal["cathode_flow"]),
+                calibrate(cathode_sccm, self.cal["cathode_flow"]),
                 self.cathode_flow_range,
             ),
         )
         alicat_control = [anode_flow_control, cathode_flow_control]
+        labview.set_alicat_control(client, alicat_control)
+        return alicat_control
 
+    def set_magnets(self, client, inner_scale, outer_scale):
         # Set the magnet power supplies
         VOLTAGE_LIMIT=float('inf')
-        inner_scale = setpoint.magnetic_field_scale
-        if setpoint.magnetic_field_scale_outer is None:
-            outer_scale = inner_scale
-        else:
-            outer_scale = setpoint.magnetic_field_scale_outer
 
         inner_magnet = LambdaControl(
             label="inner",
@@ -301,22 +265,64 @@ class ThrusterController:
             overvoltage_protection=VOLTAGE_LIMIT,
             enable=True
         )
+
         lambda_control = [inner_magnet, outer_magnet]
+        labview.set_lambda_control(client, lambda_control)
+        return lambda_control
+
+    def set_discharge_voltage(self, client, voltage):
+        # Set the power supply
+        magna_control = MagnaControl(
+            voltage_limit=apply_limits(
+                calibrate(voltage, self.cal["voltage"]),
+                self.voltage_range
+            ),
+            overcurrent_trip=75,
+            current_limit=100,
+            overvoltage_trip=1000,
+            enable=True,
+        )
+        labview.set_magna_control(client, magna_control)
+        return magna_control
+
+
+    def control_to(
+            self,
+            setpoint: ControlPoint,
+            client: LabViewClient,
+            set_lambdas: bool = True,
+            set_alicats: bool = True,
+            set_magna: bool = True,
+            ):
+
+        self.setpoint = setpoint
+
+        if self.control_to_file != "":
+            self.send_command(self.control_to_file, "set_control", self.setpoint.model_dump())
+            self.wait_for_command(self.control_to_file, types=["receive_control"])
+            return
+
+        anode_flow_rate_sccm = self.kgs_to_sccm(setpoint.anode_mass_flow_rate_kg_s)
+        cathode_flow_rate_sccm = anode_flow_rate_sccm * setpoint.cathode_flow_fraction
+
+        inner_scale = setpoint.magnetic_field_scale
+        if setpoint.magnetic_field_scale_outer is None:
+            outer_scale = inner_scale
+        else:
+            outer_scale = setpoint.magnetic_field_scale_outer
 
         if client.dummy:
             # Don't actually try and set controls if the client is set to dummy
             return
 
-        if set_magna:
-            labview.set_magna_control(client, magna_control)
+        if set_lambdas:
+           self.set_magnets(client, inner_scale, outer_scale)
 
         if set_alicats:
-            labview.set_alicat_control(client, alicat_control)
+            self.set_flow(client, anode_flow_rate_sccm, cathode_flow_rate_sccm)
 
-        if set_lambdas:
-            labview.set_lambda_control(client, lambda_control)
-            
-        return DeviceCommands(magna_control, alicat_control, lambda_control)
+        if set_magna:
+            self.set_discharge_voltage(client, setpoint.discharge_voltage_v)
 
     def calc_thrust(self, s, s0):
         cal = self.cal["thrust_stand"]
@@ -331,59 +337,52 @@ class ThrusterController:
         current_before = dmm.current
 
         mdot = self.setpoint.anode_mass_flow_rate_kg_s
-        cff = self.setpoint.cathode_flow_fraction
         vd = self.setpoint.discharge_voltage_v
-        b_scale = self.setpoint.magnetic_field_scale
-        b_outer = self.setpoint.magnetic_field_scale_outer
-
-        # Shut off mass flow and discharge_voltage
-        off_pt = ControlPoint(
-            anode_mass_flow_rate_kg_s=0.0,
-            cathode_flow_fraction=cff,
-            discharge_voltage_v=0.0,
-            magnetic_field_scale=b_scale,
-            magnetic_field_scale_outer=b_outer,
-        )
-
-        # Relight at higher CFF
-        relight_pt = ControlPoint(
-            anode_mass_flow_rate_kg_s=mdot,
-            cathode_flow_fraction=0.15,
-            discharge_voltage_v=vd,
-            magnetic_field_scale=b_scale,
-            magnetic_field_scale_outer=b_outer
-        )
 
         # Base setpoint
         on_pt = self.setpoint
+        mdot_a_sccm = self.kgs_to_sccm(on_pt.anode_mass_flow_rate_kg_s)
+        mdot_c_sccm = on_pt.cathode_flow_fraction * mdot_a_sccm
 
+        # Get thrust before shutoff
         thrust_before = self.take_thrust(client, num_avg_pts=num_avg_pts)
-        self.control_to(off_pt, client)
 
-        print(f"Sleeping for {settle_time} s")
-        time.sleep(settle_time)
+        # Turn thruster off by cutting flow and discharge power
+        shutoff_frac = 0.0
+        self.set_discharge_voltage(client, shutoff_frac*vd)
+        self.set_flow(client, anode_sccm=shutoff_frac*mdot_a_sccm, cathode_sccm=shutoff_frac*mdot_c_sccm)
 
+        countdown(settle_time, lambda t: f"Settling at off point for " + time_str(t) + ".")
+
+        # Get thrust after shutoff
         thrust_after = self.take_thrust(client, num_avg_pts, reset_null_shunt=True)
-        print(f"Relighting")
-        self.control_to(relight_pt, client)
 
-        print(f"Sleeping for {relight_time} seconds")
-        time.sleep(relight_time)
+        s0 = thrust_after["shunt"]
+        s = thrust_before["shunt"]
+        thrust = self.calc_thrust(s, s0)
+        print(f"Thrust measurement: {thrust["thrust_mN"]:.2f} mN (shunt={thrust["shunt"]})")
 
+        print(f"Relighting...")
+        self.set_flow(client, anode_sccm=self.kgs_to_sccm(mdot), cathode_sccm=60)
+        countdown(10, lambda t: f"Flowing gas: " + time_str(t) + ".")
+        print(f"Turning on voltage")
+        self.set_discharge_voltage(client, vd)
+
+        countdown(relight_time, lambda t: "Settling at on point for " + time_str(t) + ".")
+
+        # Check if thruster actually lit
         dmm = labview.get_dmm_readings(client)
         current_after = dmm.current
         print(f"Current: before={current_before:.3f} A, after={current_after:.3f} A") 
         if current_after < 0.5 * current_before:
-            self.control_to(off_pt, client)
-            raise ValueError("Thruster failed to relight! Turning off flow and voltage and aborting")
+            self.set_discharge_voltage(client, 0.0)
+            time.sleep(1.0)
+            raise ValueError("Thruster failed to relight! Turning off voltage and aborting")
 
         print(f"Returning to original setpoint")
         self.control_to(on_pt, client)
 
-        s0 = thrust_after["shunt"]
-        s = thrust_before["shunt"]
-
-        return self.calc_thrust(s, s0)
+        return thrust
 
     def take_thrust(self, client, num_avg_pts=10, reset_null_shunt=False):
 
@@ -418,11 +417,11 @@ class ThrusterController:
         # The oscope has 8-bit depth so we want to ensure we get maximum resolution when we get waveforms
         # This requires that we rescale things on the fly
         # Note: the keys are hard-coded here. We shouldn't do this.
-        vd = 300.0 if self.setpoint is None else self.setpoint.discharge_voltage_v
-        self.current_limit = 40
+        vd = 300
+        id = 50
         variable_settings = {
-            "Anode Current": dict(offset=self.current_limit/2, range=self.current_limit),
-            "Cathode Current": dict(offset=self.current_limit/2, range=self.current_limit),
+            "Anode Current": dict(offset=id/2, range=id),
+            "Cathode Current": dict(offset=id/2, range=id),
             "Discharge Voltage": dict(offset=vd, range=vd),
             "C2G Voltage": dict(offset=-18, range=40),
         }
@@ -469,16 +468,10 @@ class ThrusterController:
         return None
 
     def take_data(self, client: LabViewClient, delay: int = 0, num_thrust_points=10, sources: list[str] | None = None):
-        assert self.setpoint is not None
-
         # Pause according to prescribed delay
         if delay > 0:
-            line_len = len(status_str(delay))
-            for t in range(delay, 0, -1):
-                print(" "*line_len, end="\r")
-                print(status_str(t), end="\r")
-                time.sleep(1)
-            print("\nTaking data...")
+            countdown(delay, lambda t: f"Waiting to take data: " + time_str(t) + ".")
+            print("Taking data")
 
         if self.control_to_file != "":
             data_args = dict(delay=0, num_thrust_points=num_thrust_points, sources=sources)

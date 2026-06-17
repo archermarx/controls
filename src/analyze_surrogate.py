@@ -17,18 +17,14 @@ from lib import controls as controls
 from lib import labview as labview
 from lib import surrogate as surrogate
 
-def _ax_plot_surrogate_1d(ax, xs, ys, metadata, iter):
-    lb = metadata["lower_bound"]
-    ub = metadata["upper_bound"]
-
-    surr = surrogate.Surrogate(bounds=(lb, ub), kernel="matern52")
-    surr.X = xs
-    surr.Y = ys
-    surr._fit()
+def _ax_plot_surr_1d(ax, surr, metadata, iter):
+    lb, ub = surr.bounds
+    lb, ub = lb[0], ub[0]
+    xs = surr.X
+    ys = surr.Y
 
     x = np.linspace(lb, ub, 101)
     x_scaled = surr._scale(x)
-    assert surr.model is not None
     surr_val = surr.model.predict_values(x_scaled).squeeze(-1)
     surr_std = np.sqrt(np.maximum(surr.model.predict_variances(x_scaled), 0.0)).squeeze(-1)
 
@@ -39,17 +35,20 @@ def _ax_plot_surrogate_1d(ax, xs, ys, metadata, iter):
     ax.set(xlim=(lb, ub), title=f"Iteration {iter}", xlabel=metadata["variable_name"], ylabel=metadata["metric_name"])
     ax.set_ylim(metadata.get("ylims", (None, None)))
 
-def _ax_plot_surrogate_2d(ax, xs, ys, metadata, iter):
-    lb = metadata["lower_bound"]
-    ub = metadata["upper_bound"]
-    
-    surr = surrogate.Surrogate(bounds=(lb, ub))
-    surr.X = xs
-    surr.Y = ys
-    surr._fit()
-    assert surr.model is not None
+def _ax_plot_surr_2d(ax, surr, metadata, iter):
+    lb, ub = surr.bounds
+    ylims = metadata.get("ylims", None)
 
-    vmin, vmax = metadata["ylims"]
+    xs = surr.X
+    ys = surr.Y
+    if ylims is None:
+        ymin, ymax = np.min(ys), np.max(ys)
+        dy = ymax - ymin
+        vmin = ymin - 0.025 * dy
+        vmax = ymax + 0.025 * dy
+    else:
+        vmin, vmax = ylims
+    
     norm = matplotlib.colors.Normalize(vmin=vmin, vmax=vmax)
 
     m = 25
@@ -81,19 +80,30 @@ def _ax_plot_surrogate_2d(ax, xs, ys, metadata, iter):
         title = f"Iteration {iter}",
         aspect = 'auto'
     )
-    return cf
+    return cf, ylims
 
-def plot_surrogate(xs, ys, metadata, iter, output: Path = Path(".")):
+def build_and_plot_surrogate(xs, ys, metadata, iter, output: Path = Path(".")):
+    lb = metadata["lower_bound"]
+    ub = metadata["upper_bound"]
+    
+    surr = surrogate.Surrogate(bounds=(lb, ub))
+    surr.X = xs
+    surr.Y = ys
+    surr._fit()
+    assert surr.model is not None
+    plot_surrogate(surr, metadata, iter, output)
+
+def plot_surrogate(surr, metadata, iter, output: Path = Path(".")):
     fig, ax = plt.subplots(1,1)
-    dim = len(xs[0])
+    dim = surr.dim
     if dim == 1:
-        _ax_plot_surrogate_1d(ax, xs, ys, metadata, iter)
+        _ax_plot_surr_1d(ax, surr, metadata, iter)
     else:
-        cf = _ax_plot_surrogate_2d(ax, xs, ys, metadata, iter)
+        cf, ylim = _ax_plot_surr_2d(ax, surr, metadata, iter)
         divider = make_axes_locatable(ax)
         cax = divider.append_axes("right", size="5%", pad=0.05)
         cb = plt.colorbar(cf, cax=cax, extend='both', label=metadata["metric_name"])
-        cb.mappable.set_clim(*metadata["ylims"])
+        cb.mappable.set_clim(*ylim)
 
     im_path = output / f"surrogate_{iter:03d}.png"
     fig.savefig(im_path , dpi=200)
@@ -135,7 +145,7 @@ def main():
         image_paths = []
         for i in range(len(xs)):
             if i > dim:
-                im_path = plot_surrogate(xs[:i], ys[:i], iter=i, metadata=metadata, output=plot_dir)
+                im_path = build_and_plot_surrogate(xs[:i], ys[:i], iter=i, metadata=metadata, output=plot_dir)
                 image_paths.append(im_path)
                 print(str(im_path))
 
