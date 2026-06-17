@@ -22,6 +22,7 @@ parser.add_argument("--dwell-time", "-t", type=int, default=5, help="How long (i
 parser.add_argument("--host-ip", type=str, default=labview.LABVIEW_IP, help="The IP address of the LabVIEW client")
 parser.add_argument("--port", type=int, default=labview.LABVIEW_PORT, help="The port of the LabVIEW client")
 parser.add_argument("--interactive", "-i", action="store_true", help="Whether to ask the user before proceeding to the next control point")
+parser.add_argument("--remote-file", type=str, help="Remote control file to use. Optional.", default="")
 
 def num_digits(n):
     if n > 0:
@@ -56,7 +57,12 @@ def main(args):
     cathode_flow_fractions = matrix["cathode_flow_fraction"]
     magnetic_field_strengths = matrix["magnetic_field_scale"]
 
-    controller = controls.ThrusterController(args.cal_file, propellant=args.gas, verbose=args.verbose)
+    controller = controls.ThrusterController(
+        args.cal_file,
+        propellant=args.gas, 
+        verbose=args.verbose,
+        control_to_file=args.remote_file
+    )
     output_dir = Path(args.output)
     os.makedirs(output_dir, exist_ok=True)
 
@@ -66,7 +72,8 @@ def main(args):
 
     starting_point = None
 
-    with labview.LabViewClient(host=args.host_ip, port=args.port) as client:
+    dummy = args.remote_file == ""
+    with labview.LabViewClient(host=args.host_ip, port=args.port, dummy=dummy) as client:
         for (i, (mdot, vd, cff, bmag)) in enumerate(zip(flow_rates, discharge_voltages, cathode_flow_fractions, magnetic_field_strengths)):
             
             setpoint = controls.ControlPoint(

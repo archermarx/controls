@@ -12,6 +12,7 @@ parser.add_argument("--cal-file", "-c", type=Path, help="The path to the thruste
 parser.add_argument("--sleep-interval", type=float, default=0.25, help="How often, in seconds, to check for modifications to the command file")
 parser.add_argument("--dummy", action="store_true")
 parser.add_argument("--verbose", action="store_true")
+parser.add_argument("--gas", "-g", type=str, choices=["Xe", "Kr", "Ar"], help="Propellant to use.")
 
 if __name__ == "__main__":
     args = parser.parse_args()
