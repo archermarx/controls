@@ -37,14 +37,14 @@ parser.add_argument("--prefix", "-p", type=str, default="surrogate")
 parser.add_argument("--reset-at-end", action="store_true")
 parser.add_argument("--interactive", action="store_true")
 parser.add_argument("--objective", type=str, default="rms")
+parser.add_argument("--restart", type=str)
 
 parser.add_argument("--remote-dir", type=Path)
 
 def compute_rms_amplitude_master(data, setpoint):
     dmm = data["dmm"]
-    anode_current = labview.OscopeReadings(**data["oscope"]["Anode Current"])
-
-    time, current = anode_current.waveform.time_values(), anode_current.waveform.y_values()
+    anode_current = labview.OscopeReadings.from_dict(data["oscope"]["Anode Current"])
+    _, current = anode_current.waveform.time_values(), anode_current.waveform.y_values()
     mean_oscope = np.mean(current)
     mean_dmm = dmm["current"]
     current_centered = current - mean_oscope
@@ -61,7 +61,7 @@ def rms_amplitude_pct(data, setpoint, *args, **kwargs):
 
 def compute_efficiency(data, setpoint: controls.ControlPoint):
     dmm: dict = data["dmm"]
-    thrust_mN: float = data["thrust"]
+    thrust_mN: float = data["thrust"]["thrust_mN"]
     thrust_N = thrust_mN / 1000
     current_A = dmm["current"]
     mdot = setpoint.anode_mass_flow_rate_kg_s
@@ -131,38 +131,36 @@ def main(args):
 
     output_dir = Path(args.output)
     os.makedirs(output_dir, exist_ok=True)
-
     base_setpoint = read_setpoint(args.setpoint)
-
-    #np.random.seed(1234)
-    np.random.seed(4321)
-    initial_controls = [setpoint_to_vector(base_setpoint, control_vars)]
-    initial_controls += [np.array([np.random.uniform(lb, ub) for (lb, ub) in bounds]) for _ in range(dim)]
-    print(f"{initial_controls=}")
 
     if args.objective == "rms":
         metric_fn = rms_amplitude_pct
     elif args.objective == "efficiency":
         metric_fn = efficiency_obj
 
-    surrogate = Surrogate(
-        bounds=bounds,
-        optimize_restarts=args.optimize_restarts,
-        acquisition=args.acquisition,
-    )
+    lb, ub = [b[0] for b in bounds], [b[1] for b in bounds]
+
+    if args.restart is not None:
+        with open(args.restart, "rb") as fd:
+            restart = pickle.load(fd)
+        initial_controls = []
+        surrogate = Surrogate.from_dict(restart["surrogate"])
+        start_step = restart["step"]
+    else:
+        start_step = 0
+        np.random.seed(4321)
+        initial_controls = [setpoint_to_vector(base_setpoint, control_vars)]
+        initial_controls += [np.array([np.random.uniform(lb, ub) for (lb, ub) in bounds]) for _ in range(dim)]
+        print(f"{initial_controls=}")
+        surrogate = Surrogate(
+            bounds=(lb, ub),
+            optimize_restarts=args.optimize_restarts,
+            acquisition=args.acquisition,
+        )
 
     controller = controls.ThrusterController(
         args.cal_file, propellant=args.gas, verbose=args.verbose
     )
-
-    c_initial_raw = setpoint_to_vector(base_setpoint, control_vars)
-    c_initial = clip_to_bounds(c_initial_raw, bounds)
-
-    if not np.allclose(c_initial_raw, c_initial):
-        print("Warning: initial setpoint was outside the supplied bounds.")
-        print(f"Raw initial control:     {c_initial_raw}")
-        print(f"Clipped initial control: {c_initial}")
-
 
     print("Starting surrogate control.")
     print(f"Control variables: {control_vars}")
@@ -171,26 +169,24 @@ def main(args):
     print(f"Steps: {args.num_steps}")
     print()
 
-    print("Initial control vectors:")
+    print("Initial control points:")
     for i, c in enumerate(initial_controls):
-        source = "original setpoint" if i == 0 else "hard-coded perturbation"
-        print(f"    {i + 1}: {source}: {c}")
+        print(f"    {i + 1}: {c}")
     print()
 
-    log = []
     should_exit=False
-
     best_setpoint = None
     best_metric = np.inf
     max_no_improvement = 10
     no_improvement_timer = 0
 
     with labview.LabViewClient(host=args.host_ip, port=args.port, timeout=60) as client:
-        for step in range(args.num_steps):
-            if step < dim+1:
+        for step in range(args.num_steps + len(initial_controls)):
+            step_num = step + start_step + 1
+
+            if step < len(initial_controls):
                 c_current = initial_controls[step]
                 z_pred = np.nan
-
             else:
                 if not surrogate.is_trained:
                     print()
@@ -212,7 +208,7 @@ def main(args):
             )
 
             print()
-            print(f"Step {step + 1}/{args.num_steps}")
+            print(f"Step {step_num}/{args.num_steps}")
             print(f"Commanding: {setpoint}")
             if args.interactive:
                 while True:
@@ -261,8 +257,7 @@ def main(args):
                 if dim == 1:
                     fig, axs = plt.subplots(2,1, layout='constrained', figsize=(6,6))
                     surrogate.plot_1d_on_axis(axs[1])
-                    lb, ub = bounds[0]
-                    x = np.linspace(lb, ub, 100)
+                    x = np.linspace(lb[0], ub[0], 100)
                     ei = [surrogate.expected_improvement([_x]) for _x in x]
                     axs[0].plot(x, ei, color = 'red')
                     axs[0].set(title="Expected improvement", xticklabels = [], xlim=(lb, ub))
@@ -271,44 +266,33 @@ def main(args):
                     plt.close(fig)
 
             sample = {
-                "step": step + 1,
-                "status": "ok",
+                "step": {step_num},
                 "z_actual": z_actual,
                 "z_pred": z_pred,
                 "control_vars": control_vars,
                 "control_vector": c_current,
                 "setpoint": setpoint.model_dump(),
                 "data": data,
-                "surrogate_trained": surrogate.is_trained,
-                "num_surrogate_points": len(surrogate.Y),
+                "surrogate": surrogate.to_dict(),
             }
 
-            log.append(sample)
 
-            out_file = output_dir / f"{args.prefix}_{step + 1:03d}.pkl"
-            log_file = output_dir / f"{args.prefix}_log.pkl"
-
+            out_file = output_dir / f"{args.prefix}_{step_num:03d}.pkl"
             with open(out_file, "wb") as fd:
                 pickle.dump(sample, fd)
-
-            with open(log_file, "wb") as fd:
-                pickle.dump(log, fd)
 
             print(f"z = {z_actual:.6g} (best = {best_metric:.6g})")
             print(f"Surrogate trained: {surrogate.is_trained}")
             print(f"Saved: {out_file}")
 
         if args.reset_at_end or best_setpoint is None:
-            print()
             print("Resetting to base setpoint.")
             controller.control_to(base_setpoint, client)
         else:
             print(f"Setting to optimum: {best_setpoint}\n(metric = {best_metric:.6g})")
             controller.control_to(best_setpoint, client)
 
-    print()
     print("Done.")
-
 
 if __name__ == "__main__":
     args = parser.parse_args()
