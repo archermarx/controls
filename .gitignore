@@ -19,3 +19,5 @@ uv.lock
 extract_current.py
 surrogate_optimize.py
 *.pkl
+*.bat
+*.sh

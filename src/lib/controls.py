@@ -137,7 +137,8 @@ class ThrusterController:
         # Limits
         self.voltage_range = voltage_range
         self.flow_range = flow_range
-        self.cathode_flow_range = (0.05 * flow_range[0], 0.1 * flow_range[1])
+        self.cathode_flow_range = flow_range
+        #self.cathode_flow_range = (0.05 * flow_range[0], 0.1 * flow_range[1])
 
         # Oscope ranges
         self.oscope_time_width = 10e-3
@@ -280,7 +281,7 @@ class ThrusterController:
             overcurrent_trip=75,
             current_limit=100,
             overvoltage_trip=1000,
-            enable=True,
+            enable=voltage > 0,
         )
         labview.set_magna_control(client, magna_control)
         return magna_control

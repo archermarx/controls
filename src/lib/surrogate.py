@@ -4,6 +4,7 @@ from smt.sampling_methods import LHS
 from smt.surrogate_models import KRG
 import matplotlib.pyplot as plt
 from scipy.stats import norm
+from scipy.spatial.distance import cdist
 
 class Surrogate:
     def __init__(
@@ -56,7 +57,7 @@ class Surrogate:
     @staticmethod
     def from_dict(d):
         surr = Surrogate(
-            bounds = (d["lb"], d["lb"]),
+            bounds = (d["lb"], d["ub"]),
             kernel = d["kernel"],
             optimize_restarts=d["optimize_restarts"],
             acquisition = d["acquisition"],
@@ -92,12 +93,18 @@ class Surrogate:
         assert len(Y.shape) == 1
         assert X.shape[1] == self.dim
 
-        self.X = np.concat((self.X, X))
-        self.Y = np.concat((self.Y, Y))
+        if len(self.X) == 0:
+            self.X = X
+            self.Y = Y
+        else:
+            self.X = np.concat((self.X, X))
+            self.Y = np.concat((self.Y, Y))
         self._fit()
 
     def _fit(self):
         # Keep track of best point
+        self.Y = np.array(self.Y)
+        self.X = np.array(self.X)
         self.best_ind = np.argsort(self.Y)
         self.best_y = self.Y[self.best_ind]
         self.best_x = self.X[self.best_ind]
@@ -133,7 +140,6 @@ class Surrogate:
             if lml > best_lml:
                 best_lml, best_model = lml, model
 
-
         self.model = best_model
         self.is_trained = True
 
@@ -151,7 +157,6 @@ class Surrogate:
         if not self.is_trained:
             x0 = self._default_control()
             return x0, self(x0)
-
 
         # Generate random start locations using LHS sampling
         start_locs = self.sample_in_bounds(self.optimize_restarts)
@@ -176,6 +181,18 @@ class Surrogate:
             if opt_y < optim_best_y:
                 optim_best_y = opt_y
                 optim_best_x = opt_x
+
+        # pick random point if too close to existing point
+        X_scaled = self._scale(self.X)
+        best_x_scaled = self._scale(optim_best_x)
+
+        min_dist = np.min(cdist([best_x_scaled], X_scaled))
+        if min_dist < 1e-3:
+            print(f"Using random point")
+            optim_best_x = np.array([
+                np.random.uniform(self.lb[i], self.ub[i])
+                for i in range(self.dim)
+            ])
 
         return optim_best_x, optim_best_y
 
@@ -390,16 +407,17 @@ class Surrogate:
             linewidth=2,
         )
 
-        c_ei, z_ei = self.optimize(acquisition="ei")
+        if self.acquisition == "ei":
+            c_ei, z_ei = self.optimize(acquisition="ei")
 
-        ax.scatter(
-            c_ei[0],
-            z_ei,
-            marker="D",
-            s=90,
-            label="EI-selected next point",
-            zorder=6,
-        )
+            ax.scatter(
+                c_ei[0],
+                z_ei,
+                marker="D",
+                s=90,
+                label="EI-selected next point",
+                zorder=6,
+            )
 
         ax.fill_between(
             c_grid,

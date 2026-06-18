@@ -18,8 +18,7 @@ from lib import labview as labview
 from lib import surrogate as surrogate
 
 def _ax_plot_surr_1d(ax, surr, metadata, iter):
-    lb, ub = surr.bounds
-    lb, ub = lb[0], ub[0]
+    lb, ub = surr.lb[0], surr.ub[0]
     xs = surr.X
     ys = surr.Y
 
@@ -36,7 +35,7 @@ def _ax_plot_surr_1d(ax, surr, metadata, iter):
     ax.set_ylim(metadata.get("ylims", (None, None)))
 
 def _ax_plot_surr_2d(ax, surr, metadata, iter):
-    lb, ub = surr.bounds
+    lb, ub = surr.lb, surr.ub
     ylims = metadata.get("ylims", None)
 
     xs = surr.X
@@ -44,8 +43,8 @@ def _ax_plot_surr_2d(ax, surr, metadata, iter):
     if ylims is None:
         ymin, ymax = np.min(ys), np.max(ys)
         dy = ymax - ymin
-        vmin = ymin - 0.025 * dy
-        vmax = ymax + 0.025 * dy
+        vmin = ymin - 0.05 * dy
+        vmax = ymax + 0.05 * dy
     else:
         vmin, vmax = ylims
     
@@ -80,7 +79,7 @@ def _ax_plot_surr_2d(ax, surr, metadata, iter):
         title = f"Iteration {iter}",
         aspect = 'auto'
     )
-    return cf, ylims
+    return cf, (vmin, vmax)
 
 def build_and_plot_surrogate(xs, ys, metadata, iter, output: Path = Path(".")):
     lb = metadata["lower_bound"]
@@ -91,7 +90,7 @@ def build_and_plot_surrogate(xs, ys, metadata, iter, output: Path = Path(".")):
     surr.Y = ys
     surr._fit()
     assert surr.model is not None
-    plot_surrogate(surr, metadata, iter, output)
+    return plot_surrogate(surr, metadata, iter, output)
 
 def plot_surrogate(surr, metadata, iter, output: Path = Path(".")):
     fig, ax = plt.subplots(1,1)

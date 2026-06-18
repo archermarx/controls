@@ -35,7 +35,7 @@ for file in os.listdir(dir):
     with open(os.path.join(dir, file), "rb") as fd:
         contents = pickle.load(fd)
 
-    oscope: labview.OscopeReadings = contents["data"]["oscope"]["Anode Current"]
+    oscope = labview.OscopeReadings.from_dict(contents["data"]["oscope"]["Anode Current"])
 
     setpoint = contents["controls"]
     rms = oscope.rms
@@ -43,7 +43,7 @@ for file in os.listdir(dir):
     peak_to_peak = oscope.peak_to_peak
     waveform = oscope.waveform
 
-    dmm = contents["data"]["dmm"].current
+    dmm = contents["data"]["dmm"]["current"]
     print(f"Average (DMM): {dmm} A")
     print(f"Average (oscope): {average} A")
     print(f"Peak to peak (oscope): {peak_to_peak} A")
