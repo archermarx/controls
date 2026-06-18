@@ -12,13 +12,20 @@ from lib.surrogate import Surrogate
 
 from analyze_surrogate import plot_surrogate
 
+
+def split_and_strip(text, dlm=","):
+    return [x.strip() for x in text.split(dlm) if x.strip()]
+
+
 parser = argparse.ArgumentParser()
 
-parser.add_argument("--cal-file", "-c", type=Path, help="The path to the thruster calibration file")
+parser.add_argument(
+    "--cal-file", "-c", type=Path, help="The path to the thruster calibration file"
+)
 parser.add_argument("--setpoint", "-s", type=Path, required=True)
 parser.add_argument("--control-vars", type=str, required=True)
 parser.add_argument("--bounds", type=str, required=True)
-parser.add_argument("--data", "-d", type=lambda s: [item.strip() for item in s.split(",") if item.strip()])
+parser.add_argument("--data", "-d", type=split_and_strip)
 parser.add_argument("--num-steps", "-n", type=int, default=25)
 parser.add_argument("--dwell-time", "-t", type=int, default=5)
 parser.add_argument("--gas", "-g", type=str, choices=["Xe", "Kr", "Ar"], default="Kr")
@@ -28,7 +35,9 @@ parser.add_argument("--port", type=int, default=labview.LABVIEW_PORT)
 parser.add_argument("--verbose", "-v", action="store_true")
 
 parser.add_argument("--optimize-restarts", type=int, default=5)
-parser.add_argument("--acquisition", type=str, choices=["ei", "eig", "mean"], default="ei")
+parser.add_argument(
+    "--acquisition", type=str, choices=["ei", "eig", "mean"], default="ei"
+)
 
 parser.add_argument("--output", "-o", type=Path, default=Path("."))
 parser.add_argument("--prefix", "-p", type=str, default="surrogate")
@@ -39,61 +48,6 @@ parser.add_argument("--restart", type=str)
 parser.add_argument("--remote-dir", type=Path)
 parser.add_argument("--max-no-improvement", type=int, default=10)
 
-def compute_rms_amplitude_master(data, setpoint):
-    dmm = data["dmm"]
-    anode_current = labview.OscopeReadings.from_dict(data["oscope"]["Anode Current"])
-    _, current = anode_current.waveform.time_values(), anode_current.waveform.y_values()
-    mean_oscope = np.mean(current)
-    mean_dmm = dmm["current"]
-    current_centered = current - mean_oscope
-
-    # centered rms = sqrt(mean((I - I_mean)^2))
-    rms_current = np.sqrt(np.mean((current_centered)**2))
-    return rms_current, rms_current/mean_dmm
-
-def rms_amplitude_raw(data, setpoint, *args, **kwargs):
-    return compute_rms_amplitude_master(data, setpoint)[0]
-
-def rms_amplitude_pct(data, setpoint, *args, **kwargs):
-    return compute_rms_amplitude_master(data, setpoint)[1]
-
-def performance_metrics(data, setpoint: controls.ControlPoint):
-    dmm: dict = data["dmm"]
-    thrust_mN: float = data["thrust"]["thrust_mN"]
-    thrust_N = thrust_mN / 1000
-    current_A = dmm["current"]
-    mdot = setpoint.anode_mass_flow_rate_kg_s
-    vd = setpoint.discharge_voltage_v
-    power_W = vd * current_A
-    power_kW = power_W / 1000
-
-    anode_eff = 0.5 * thrust_N**2 / mdot / vd / current_A
-    thrust_to_power = thrust_mN / power_kW
-    isp = thrust_N / mdot / 9.81
-
-    return {"anode_eff": anode_eff, "thrust": thrust_mN, "thrust_to_power": thrust_to_power, "isp": isp}
-
-def discharge_current(data, setpoint: controls.ControlPoint):
-    return data["dmm"]["current"]
-
-def efficiency_obj(data, setpoint):
-    eff = performance_metrics(data, setpoint)["anode_eff"]
-    return (1 - eff)
-
-def thrust_to_power_obj(data, setpoint, min_isp=2300):
-    def smoothstep(edge0, edge1, x):
-        t = max(0.0, min(1.0, (x - edge0) / (edge1 - edge0)))
-        return t * t * (3 - 2 * t)
-
-    perf = performance_metrics(data, setpoint)
-    isp, t2p = perf["isp"], perf["thrust_to_power"]
-
-    isp_penalty = smoothstep(1.025*min_isp, 0.975*min_isp, isp) * 100
-    print(f"{isp=:.3f}, {isp_penalty=:.3f}")
-    return -t2p + isp_penalty
-
-def parse_control_vars(text):
-    return [x.strip() for x in text.split(",") if x.strip()]
 
 def parse_bounds(text):
     bounds = []
@@ -118,31 +72,13 @@ def parse_bounds(text):
 
 def clip_to_bounds(c, bounds):
     return np.array(
-        [
-            np.clip(value, lo, hi)
-            for value, (lo, hi) in zip(c, bounds)
-        ],
+        [np.clip(value, lo, hi) for value, (lo, hi) in zip(c, bounds)],
         dtype=float,
     )
 
-def read_setpoint(path):
-    with open(path, "rb") as fd:
-        return controls.ControlPoint.model_validate_json(fd.read())
-
-def setpoint_to_vector(setpoint, control_vars):
-    return np.array(
-        [float(getattr(setpoint, name)) for name in control_vars],
-        dtype=float,
-    )
-
-def vector_to_setpoint(base_setpoint, control_vars, c):
-    setpoint = base_setpoint.model_copy(deep=True)
-    for name, value in zip(control_vars, c):
-        setattr(setpoint, name, float(value))
-    return setpoint
 
 def main(args):
-    control_vars = parse_control_vars(args.control_vars)
+    control_vars = split_and_strip(args.control_vars)
     bounds = parse_bounds(args.bounds)
 
     if len(control_vars) != len(bounds):
@@ -152,16 +88,7 @@ def main(args):
 
     output_dir = Path(args.output)
     os.makedirs(output_dir, exist_ok=True)
-    base_setpoint = read_setpoint(args.setpoint)
-
-    if args.objective == "rms":
-        metric_fn = rms_amplitude_pct
-    elif args.objective == "efficiency":
-        metric_fn = efficiency_obj
-    elif args.objective == "thrust_to_power":
-        metric_fn = thrust_to_power_obj
-    elif args.objective == "discharge_current":
-        metric_fn = discharge_current
+    base_setpoint = controls.read_setpoint(args.setpoint)
 
     lb, ub = [b[0] for b in bounds], [b[1] for b in bounds]
 
@@ -171,11 +98,14 @@ def main(args):
         initial_controls = []
         start_step = restart["step"]
         surrogate = Surrogate.from_dict(restart["surrogate"])
-        surrogate.acquisition=args.acquisition
+        surrogate.acquisition = args.acquisition
     else:
         start_step = 0
-        initial_controls = [setpoint_to_vector(base_setpoint, control_vars)]
-        initial_controls += [np.array([np.random.uniform(lb, ub) for (lb, ub) in bounds]) for _ in range(min(6, 2*(dim+1)))]
+        initial_controls = [controls.setpoint_to_vector(base_setpoint, control_vars)]
+        initial_controls += [
+            np.array([np.random.uniform(lb, ub) for (lb, ub) in bounds])
+            for _ in range(min(6, 2 * (dim + 1)))
+        ]
         print(f"{initial_controls=}")
         surrogate = Surrogate(
             bounds=(lb, ub),
@@ -187,7 +117,7 @@ def main(args):
         args.cal_file, propellant=args.gas, verbose=args.verbose
     )
 
-    print(f"Null shunt value: {controller.cal["thrust_stand"]["shunt_at_setpoint"]}")
+    print(f"Null shunt value: {controller.cal['thrust_stand']['shunt_at_setpoint']}")
 
     print("Starting surrogate control.")
     print(f"Control variables: {control_vars}")
@@ -201,11 +131,12 @@ def main(args):
         print(f"    {i + 1}: {c}")
     print()
 
-    should_exit=False
+    should_exit = False
     best_setpoint = None
     best_metric = np.inf
     max_no_improvement = args.max_no_improvement
     no_improvement_timer = 0
+    metric_fn = controls.pick_metric(args.metric)
 
     with labview.LabViewClient(host=args.host_ip, port=args.port, timeout=60) as client:
         for step in range(args.num_steps + len(initial_controls)):
@@ -220,7 +151,7 @@ def main(args):
                 c_current, z_pred = surrogate.optimize(acquisition=args.acquisition)
                 c_current = clip_to_bounds(c_current, bounds)
 
-            setpoint = vector_to_setpoint(
+            setpoint = controls.vector_to_setpoint(
                 base_setpoint,
                 control_vars,
                 c_current,
@@ -231,11 +162,11 @@ def main(args):
             print(f"Commanding: {setpoint}")
             if args.interactive:
                 while True:
-                    inp = input(f"Continue? (y/n): ")
+                    inp = input("Continue? (y/n): ")
                     if inp.casefold() == "y":
                         break
                     elif inp.casefold() == "n":
-                        should_exit=True
+                        should_exit = True
                         break
 
             if should_exit:
@@ -250,51 +181,63 @@ def main(args):
                 delay=args.dwell_time,
                 sources=args.data,
             )
+            perf = controls.calc_performance_metrics(data, setpoint)
 
-            z_actual = metric_fn(data, setpoint)
+            z_actual = metric_fn(perf)
             if z_actual < best_metric:
                 best_setpoint = setpoint
                 best_metric = z_actual
                 no_improvement_timer = 0
             elif surrogate.is_trained and args.acquisition != "eig":
                 no_improvement_timer += 1
-                print(f"No improvement on best. Timer = {no_improvement_timer}/{max_no_improvement}")
+                print(
+                    f"No improvement on best. Timer = {no_improvement_timer}/{max_no_improvement}"
+                )
                 if no_improvement_timer >= max_no_improvement:
                     break
 
-            mean_current = data["dmm"]["current"]
-            rms_pct = rms_amplitude_pct(data, setpoint)
-            rms_raw = rms_amplitude_raw(data, setpoint)
-            print(f"Mean: {mean_current:.3f} A, RMS Amplitude: {rms_raw:.3f} A ({rms_pct*100:.2f}%)")
+            mean_current = perf["discharge_current_A"]
+            rms_raw = perf["discharge_current_rms_A"]
+            rms_pct = rms_raw / mean_current
+
+            print(
+                f"Mean: {mean_current:.3f} A, RMS Amplitude: {rms_raw:.3f} A ({rms_pct * 100:.2f}%)"
+            )
 
             if args.objective == "efficiency" or args.objective == "thrust_to_power":
-                perf = performance_metrics(data, setpoint)
                 thrust = data["thrust"]["thrust_mN"]
                 efficiency = perf["anode_eff"]
-                print(f"Thrust: {thrust:.3f} mN, efficiency: {efficiency:.3f}, shunt: {data["thrust"]["shunt"]}")
-
-            if args.objective == "thrust_to_power":
-                thrust = perf["thrust"]
-                efficiency = perf["anode_eff"]
-                isp = perf["isp"]
-                thrust_to_power = perf["thrust_to_power"]
-                print(f"Isp: {isp:.1f} s, Thrust/power: {thrust_to_power:.2f} mN/kW")
+                print(
+                    f"Thrust: {thrust:.3f} mN, efficiency: {efficiency:.3f}, shunt: {data['thrust']['shunt']}"
+                )
+                if args.objective == "thrust_to_power":
+                    thrust = perf["thrust"]
+                    efficiency = perf["anode_eff"]
+                    isp = perf["isp"]
+                    thrust_to_power = perf["thrust_to_power"]
+                    print(
+                        f"Isp: {isp:.1f} s, Thrust/power: {thrust_to_power:.2f} mN/kW"
+                    )
 
             surrogate.update([c_current], [z_actual])
             if surrogate.is_trained:
                 if dim == 1:
-                    fig, axs = plt.subplots(2,1, layout='constrained', figsize=(6,6))
+                    fig, axs = plt.subplots(2, 1, layout="constrained", figsize=(6, 6))
                     surrogate.plot_1d_on_axis(axs[1])
                     x = np.linspace(lb[0], ub[0], 100)
                     xlim = (lb[0], ub[0])
                     if surrogate.acquisition == "ei":
                         ei = [surrogate.expected_improvement([_x]) for _x in x]
-                        axs[0].plot(x, ei, color = 'red')
-                        axs[0].set(title="Expected improvement", xticklabels = [], xlim=xlim)
+                        axs[0].plot(x, ei, color="red")
+                        axs[0].set(
+                            title="Expected improvement", xticklabels=[], xlim=xlim
+                        )
                     elif surrogate.acquisition == "eig":
                         ei = [surrogate.expected_information_gain([_x]) for _x in x]
-                        axs[0].plot(x, ei, color = 'red')
-                        axs[0].set(title="Expected information gain", xticklabels = [], xlim=xlim)
+                        axs[0].plot(x, ei, color="red")
+                        axs[0].set(
+                            title="Expected information gain", xticklabels=[], xlim=xlim
+                        )
 
                     axs[1].set(xlim=xlim)
                     fig.savefig("surrogate.png")
@@ -319,7 +262,6 @@ def main(args):
                 "surrogate": surrogate.to_dict(),
             }
 
-
             out_file = output_dir / f"{args.prefix}_{step_num:03d}.pkl"
             with open(out_file, "wb") as fd:
                 pickle.dump(sample, fd)
@@ -336,6 +278,7 @@ def main(args):
             controller.control_to(best_setpoint, client)
 
     print("Done.")
+
 
 if __name__ == "__main__":
     args = parser.parse_args()

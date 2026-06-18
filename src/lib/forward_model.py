@@ -8,7 +8,7 @@ from pathlib import Path
 
 import numpy as np
 
-from hall_diffusion.utils.thruster_data import ThrusterDataset, invert_fft_vector
+from hall_diffusion.utils.thruster_data import ThrusterDataset
 
 
 def getkey_deep(d, keystr):
@@ -131,20 +131,6 @@ class ForwardModel:
             "postprocess": {},
         }
 
-    def calc_data(self, tensor, fourier):
-        times = np.linspace(0, self.duration / 2, 1001)
-        data_timedomain = invert_fft_vector(times, fourier)
-
-        data_dict = {
-            "discharge_current": {
-                "fourier": fourier.tolist(),
-                "time": times.tolist(),
-                "signal": data_timedomain.tolist(),
-            },
-        }
-
-        return data_dict
-
     def _make_config(self, state, control, output_file=None):
         """Generate a valid HallThruster.jl config dictionary corresponding to the given state and control"""
         cfg = self._base_config()
@@ -248,7 +234,26 @@ class ForwardModel:
                 rms = fourier[1] * mean_current
                 fourier[0], fourier[1] = mean_current, rms
 
-                output_dict[file] = (state, fourier)
+                thrust = self.dataset.get_field(state, "thrust_N")
+                mdot = self.dataset.get_field(state, "anode_mass_flow_rate_kg_s")
+                Vd = self.dataset.get_field(state, "discharge_voltage_v")
+
+                Pd = mean_current * Vd
+                Pd_kW = Pd / 1000
+                isp = thrust / (mdot * 9.81)
+                thrust_mN = thrust * 1000
+                anode_eff = 0.5 * thrust**2 / (mdot * Pd)
+
+                data = {
+                    "discharge_current_A": mean_current,
+                    "discharge_current_rms_A": rms,
+                    "thrust_N": thrust,
+                    "isp_s": isp,
+                    "thrust_to_power_mN_kW": thrust_mN / Pd_kW,
+                    "anode_eff": anode_eff,
+                }
+
+                output_dict[file] = (state, data)
 
             outputs = []
             for id in ids:
@@ -300,17 +305,13 @@ def main():
     for o in outputs:
         if o is None:
             continue
-        state, fourier = o
+        state, data = o
         bfield_scale = (
             model.dataset.get_field(state[None, ...], "magnetic_field_scale")
             .mean()
             .item()
         )
         print(f"{bfield_scale=}")
-
-        mean_current = fourier[0]
-        rms = fourier[1]
-        print(f"{mean_current=}, {rms=}")
 
 
 if __name__ == "__main__":
