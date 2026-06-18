@@ -50,8 +50,12 @@ if __name__ == "__main__":
             )
             print(f"Controlling to setpoint: {setpoint}")
             server.control_to(setpoint, client=labview_client)
-            data = server.take_data(client=labview_client, num_thrust_points=25, delay=5)
+            data = server.take_data(
+                client=labview_client, num_thrust_points=25, delay=5
+            )
             print(f"Got data: keys = {list(data.keys())}")
+
+            print(data["oscope"]["Anode Current"].keys())
 
             oscope = labview.OscopeReadings.from_dict(data["oscope"]["Anode Current"])
             waveform = oscope.waveform
