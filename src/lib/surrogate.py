@@ -1,19 +1,25 @@
 import numpy as np
 from scipy.optimize import minimize, Bounds
 from smt.sampling_methods import LHS
-from smt.surrogate_models import KRG
-import matplotlib.pyplot as plt
+from smt.surrogate_models import KRG, KPLS
 from scipy.stats import norm
 from scipy.spatial.distance import cdist
+from typing import Literal, get_args
+
+AcquisitionFunction = Literal["ei", "eig", "mean"]
+CovarianceKernel = Literal["matern32", "matern52", "squar_exp"]
+ModelType = Literal["KRG", "KPLS"]
 
 class Surrogate:
     def __init__(
         self,
         bounds,
-        kernel="matern32",
-        optimize_restarts=10,
-        acquisition="ei",
-        noise_floor=1e-3,
+        model_type: ModelType = "KRG",
+        kernel: CovarianceKernel = "matern32",
+        optimize_restarts: int = 10,
+        hyperopt_restarts: int = 10,
+        acquisition: AcquisitionFunction ="ei",
+        noise_floor: float = 1e-3,
     ):
         self.lb, self.ub = np.array(bounds[0]), np.array(bounds[1])
         if len(self.ub) != len(self.lb):
@@ -23,8 +29,13 @@ class Surrogate:
         self.min_points = max(2, self.dim + 1)
         self.kernel = kernel
         self.optimize_restarts = optimize_restarts
-        self.allowed_acquisitions = {"mean", "ei", "eig", "ei_eig"}
 
+        self.model_type = model_type
+        self.hyperopt_restarts = hyperopt_restarts
+        if self.model_type == "KPLS" and self.kernel != "squar_exp":
+            raise ValueError("Only square exponential kernel ('squar_exp') supported with KPLS")
+
+        self.allowed_acquisitions = {"mean", "ei", "eig", "ei_eig"}
         if acquisition not in self.allowed_acquisitions:
             raise ValueError(f"acquisition must be in {self.allowed_acquisitions}")
 
@@ -116,53 +127,51 @@ class Surrogate:
             self.is_trained = False
             return
 
-        best_model, best_lml = None, -np.inf
-
         # Multistart hyperparameter optimization
         theta_bounds = [5e-2, 1.0]
-        lb_theta = np.log10(theta_bounds[0])
-        ub_theta = np.log10(theta_bounds[1])
-        for _ in range(2):
-            # random log-scale init
-            theta0 = 10 ** np.random.uniform(lb_theta, ub_theta, self.dim)  
+        if self.model_type == "KRG":
             model = KRG(
-                theta0=theta0,
-                corr=self.kernel,
+                theta0=[0.5 * (theta_bounds[1] - theta_bounds[0])],
+                corr=self.kernel, 
                 theta_bounds=theta_bounds,
                 print_global=False,
                 eval_noise=True,
                 hyper_opt="Cobyla",
+                n_start=self.hyperopt_restarts,
             )
-            model.set_training_values(X_unique, Y_unique.reshape(-1, 1))
-            model.train()
-        
-            lml = model.optimal_rlf_value  # SMT stores this
-            if lml > best_lml:
-                best_lml, best_model = lml, model
+        elif self.model_type == "KPLS":
+            model = KPLS(
+                theta0=[0.5 * (theta_bounds[1] - theta_bounds[0])],
+                theta_bounds=theta_bounds,
+                n_comp=self.dim,
+                print_global=False,
+                eval_noise=True,
+                hyper_opt="Cobyla",
+                corr=self.kernel,
+                n_start=self.hyperopt_restarts,
+            )
+        else:
+            assert False
 
-        self.model = best_model
+        model.set_training_values(X_unique, Y_unique.reshape(-1, 1))
+        model.train()
+
+        self.model = model
         self.is_trained = True
 
-    def optimize(
-        self,
-        acquisition=None,
-    ) -> tuple[np.ndarray, float]:
-
+    def optimize(self, acquisition=None, method: str = "L-BFGS-B", tol=1e-2) -> tuple[np.ndarray, float]:
         assert self.model is not None
         mode = self.acquisition if acquisition is None else acquisition
 
-        if mode not in {"mean", "ei", "eig"}:
-            raise ValueError("acquisition must be 'mean' or 'ei'")
+        if mode not in get_args(AcquisitionFunction):
+            raise ValueError(f"acquisition must be in {get_args(AcquisitionFunction)}")
 
         if not self.is_trained:
-            x0 = self._default_control()
+            x0 = 0.5 * (self.ub - self.ub)
             return x0, self(x0)
 
         # Generate random start locations using LHS sampling
         start_locs = self.sample_in_bounds(self.optimize_restarts)
-
-        # Add the best measured point to our start locations
-        start_locs = np.concat([self.best_x, start_locs])
 
         # Perform optimization
         objective = self._acquisition_objective(mode)
@@ -172,7 +181,7 @@ class Surrogate:
             result = minimize(
                 objective,
                 start,
-                method="L-BFGS-B",
+                method=method,
                 bounds=Bounds(self.lb, self.ub) # type:ignore
             )
 
@@ -186,13 +195,19 @@ class Surrogate:
         X_scaled = self._scale(self.X)
         best_x_scaled = self._scale(optim_best_x)
 
-        min_dist = np.min(cdist([best_x_scaled], X_scaled))
-        if min_dist < 1e-3:
-            print(f"Using random point")
-            optim_best_x = np.array([
-                np.random.uniform(self.lb[i], self.ub[i])
-                for i in range(self.dim)
-            ])
+        dists = cdist(X_scaled, [best_x_scaled])
+        argmin_dist = np.argmin(dists)
+        if dists[argmin_dist] < tol:
+            #print(f"{optim_best_x=} (closest={self.X[argmin_dist]})")
+            if acquisition == "ei":
+                print(f"Optimizing using EIG")
+                return self.optimize(acquisition="eig", tol=tol)
+            else:
+                print(f"Using random point")
+                optim_best_x = np.array([
+                    np.random.uniform(self.lb[i], self.ub[i])
+                    for i in range(self.dim)
+                ])
 
         return optim_best_x, optim_best_y
 
@@ -266,7 +281,7 @@ class Surrogate:
         assert self.model is not None
         _, std = self.mean_and_std(x)
         pred_var = std**2
-        noise_var = self.model.optimal_noise
+        noise_var = np.atleast_1d(self.model.optimal_noise + self.noise_floor)[0]
 
         eig = 0.5 * np.log(1 + pred_var / noise_var)
         return float(eig)
@@ -299,21 +314,16 @@ class Surrogate:
         return X_unique, Y_unique
 
     def _scale(self, X):
+        # Scale inputs to range (0, 1)
         width = self.ub - self.lb
         width[width == 0.0] = 1.0
         return (X - self.lb) / width
 
-    def _default_control(self):
-        return 0.5 * (self.lb + self.ub)
-
     def _as_vector(self, x):
         x = np.asarray(x, dtype=float).reshape(-1)
-
         if x.size != self.dim:
             raise ValueError(f"Expected dimension {self.dim}, got {x.size}")
-
         return x
-    
     
     def plot_1d_on_axis(
         self,
