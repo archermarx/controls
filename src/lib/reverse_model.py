@@ -100,7 +100,7 @@ class ReverseModel:
         if "discharge_current_signal" in data:
             Id_dict = data.pop("discharge_current_signal")
             t_vec = torch.tensor(Id_dict["time"])
-            I_vec = torch.tensor(Id_dict["discharge_current_A"])
+            I_vec = torch.tensor(Id_dict["current"])
             condition_vec = self.dataset._signal_to_vec(t_vec, I_vec, truncate=False)
         else:
             condition_vec = None

@@ -2,10 +2,11 @@ import copy
 import numpy as np
 import pickle
 
-from surrogate import Surrogate
-from forward_model import ForwardModel
-from reverse_model import ReverseModel
-from controls import ThrusterController, ControlPoint, calc_performance_metrics
+from lib.surrogate import Surrogate
+from lib.forward_model import ForwardModel
+from lib.reverse_model import ReverseModel
+from lib.controls import ThrusterController, ControlPoint, calc_performance_metrics
+import lib.utils as utils
 
 from concurrent.futures import ThreadPoolExecutor
 
@@ -59,8 +60,9 @@ class DiffusionController:
         trust_relaxation=0.5,  # Under-relaxation parameter for updating model trust.
         control_lb=None,  # Lower bounds for all control variables
         control_ub=None,  # Upper bounds for all control variables
-        penalty_strength=5e-2,  # The scale factor of the logarithmic penalty function used to avoid the bounds
+        penalty_strength=0.0,  # The scale factor of the logarithmic penalty function used to avoid the bounds
         cff=0.07,  # cathode flow fraction
+        step_scale=0.25,  # step scale
     ):
         self.iter = 0
         self.cff = cff
@@ -96,7 +98,7 @@ class DiffusionController:
 
         self.control_lb = np.array(self.control_lb)
         self.control_ub = np.array(self.control_ub)
-        self.step_scale = (self.control_ub - self.control_lb) / 4.0
+        self.step_scale = step_scale
 
         self.num_reverse_steps = num_reverse_steps
         self.num_reverse_samples = num_reverse_samples
@@ -199,14 +201,14 @@ class DiffusionController:
         # (including but not limited to the active optimization variables)
         control_pt_struct = self.dict_to_struct(self.control_point)
 
-        self.controller.control_to(client, control_pt_struct)
+        self.controller.control_to(control_pt_struct, client)
         data = self.controller.take_data(client, **data_args)
 
         # Evaluate metric on data.
         # The metric returns two values -- a raw metric and one that incorporates constraints.
         # Here, we're interested in the former.
-        z, _ = self.metric(data, self.control_point)
         perf = calc_performance_metrics(data, control_pt_struct)
+        z, _ = self.metric(perf, self.control_point)
 
         if self.current_iter_log is not None:
             # Log this stage
@@ -224,6 +226,9 @@ class DiffusionController:
         Update the model trust parameter based on the previous iteration's model and surrogate predictions.
         """
         # Await results of forward model from before and average the metrics
+
+        print("Trust update\n--------------------")
+        print(f"Metric: {z:.3g}")
         if self.z_pred_model_future is not None:
             z_pred_model_results = self.z_pred_model_future.result()
             self.z_pred_model = 0.0
@@ -235,6 +240,7 @@ class DiffusionController:
                 self.z_pred_model += self.metric(yk, self.control_point)[0]
                 count += 1
             self.z_pred_model /= count
+            print(f"Model predicted z: {self.z_pred_model:.3g}")
 
         if self.z_pred_model is None and self.z_pred_surr is None:
             # If we're in the first loop, we don't have previous predictions,
@@ -251,13 +257,17 @@ class DiffusionController:
                 # Use inverse distance weighting to interpolate between surrogate and modeling
                 # The distance is evaluated as the difference between predicted and observed
                 # z for a specified control action
+                print(f"Surrogate predicted z: {self.z_pred_surr:.3g}")
                 beta = self.trust_relaxation
                 dz_surr = np.abs(z - self.z_pred_surr)
                 dz_model = np.abs(z - self.z_pred_model)
                 new_trust = (1.0 / dz_model) ** 2 / (
                     1.0 / dz_model**2 + 1.0 / dz_surr**2
                 )
-                self.model_trust = beta * new_trust + (1 - beta) * self.model_trust
+                self.model_trust = float(
+                    beta * new_trust + (1 - beta) * self.model_trust
+                )
+                print(f"Model trust: {self.model_trust:.3f}")
 
         if self.current_iter_log is not None:
             self.current_iter_log["stages"]["update_model_trust"] = {
@@ -269,24 +279,20 @@ class DiffusionController:
         return self.model_trust
 
     def get_surrogate_proposed_control(self, c: np.ndarray, z):
-        rand_pt = np.array(
-            [
-                np.random.uniform(lb, ub)
-                for (lb, ub) in zip(self.control_lb, self.control_ub)
-            ]
-        )
+        control_vec = self.dict_to_vec(self.control_point)
 
         if self.surrogate is not None:
             # Update surrogate model with new data point
             self.surrogate.update([c], [z])
+            print(f"Surrogate updated with {c}, {z}")
+
+        if self.surrogate is not None and self.surrogate.is_trained:
             # Perform local optimization on surrogate
             # to find optimal control location
-            if self.surrogate.is_trained:
-                c_surr, _ = self.surrogate.optimize(tol=self.surrogate_tol)
-            else:
-                c_surr = rand_pt
+            c_surr, _ = self.surrogate.optimize(tol=self.surrogate_tol)
+            print(f"Surrogate optimized: {c_surr}")
         else:
-            c_surr = rand_pt
+            c_surr = control_vec
 
         if self.current_iter_log is not None:
             self.current_iter_log["stages"]["update_surrogate"] = {
@@ -312,16 +318,33 @@ class DiffusionController:
 
             # Propose one or more control actions
             proposed_controls = []
+            lb, ub = self.control_lb, self.control_ub
+
+            # Center point is somewhere between the current point and the surrogate proposed point
+            # Depending on the current model trust
+            c_center = (1 - self.model_trust) * c_surr + self.model_trust * control_vec
+            c_scaled = utils.scale_to_bounds(c_center, lb, ub)
+
             for xk in reverse_samples:
                 for _ in range(self.forwards_per_reverse):
                     # Proposed control action is a mixture of surrogate direction and random noise
                     # Balances exploration / exploitation
-                    rand_direction = np.random.standard_normal(self.control_dim)
-                    surr_direction = c_surr - control_vec
-                    c_proposed = control_vec + self.step_scale * (
-                        (1 - self.model_trust) * surr_direction + rand_direction
-                    )
-                    proposed_controls.append([xk, self.vec_to_dict(c_proposed)])
+                    # Rejection sampling ensures it's in bounds
+                    c_prop = [np.inf for _ in range(self.control_dim)]
+
+                    while True:
+                        # Pick random point around current point
+                        rand_dim = np.random.standard_normal(self.control_dim)
+                        rand_point = c_scaled + self.step_scale * rand_dim
+                        if utils.in_bounds(
+                            rand_point,
+                            np.zeros(self.control_dim),
+                            np.ones(self.control_dim),
+                        ):
+                            c_prop = utils.unscale_to_bounds(rand_point, lb, ub)
+                            break
+
+                    proposed_controls.append([xk, self.vec_to_dict(c_prop)])
 
             # Evaluate forward model for each state estimate / control action pair
             # We do this asynchronously but immediately await the result
@@ -341,14 +364,11 @@ class DiffusionController:
                     # This occurs for simulation failures and other invalid states
                     continue
 
-                (_, fourier) = forward_sample
-
-                # TODO: generalize this for other objectives
-                yk = {"mean_current_A": fourier[0], "rms_current_A": fourier[1]}
+                (_, data) = forward_sample
 
                 # Use version of metric with constraint.
                 ck_vec = self.dict_to_vec(ck)
-                z_base, z_with_constraints = self.metric(yk, ck)
+                z_base, z_with_constraints = self.metric(data, ck)
                 sim_metrics.append(z_base)
                 numerator += ck_vec / z_with_constraints**2
                 denominator += 1.0 / z_with_constraints**2
@@ -393,7 +413,7 @@ class DiffusionController:
 
         return c_final
 
-    def step(self, client):
+    def step(self, client, **data_args):
         # Start a new log for this iteration
         # TODO: keep track of best sample point
         # TODO: restart based on what stage we were at in the output file
@@ -402,13 +422,13 @@ class DiffusionController:
         self.current_iter_log = self.iter_logs[-1]
 
         self.current_iter_log["iter"] = self.iter
-        self.current_iter_log["step_scale"] = list(self.step_scale)
+        self.current_iter_log["step_scale"] = self.step_scale
         self.current_iter_log["model_trust"] = self.model_trust
         self.current_iter_log["control_point"] = list(self.control_point)
         self.current_iter_log["stages"] = {}
 
         # command thruster to current control point
-        _, y, z = self.command_thruster(client)
+        _, y, z = self.command_thruster(client, **data_args)
         control_vec = self.dict_to_vec(self.control_point)
 
         # Save the current control point and experimental metric
@@ -426,10 +446,17 @@ class DiffusionController:
         c_final = self.get_final_control(c_surr, c_model)
 
         # Predict surrogate output at this point
-        self.z_pred_surr = self.surrogate(c_final) if self.surrogate else None
+        if self.surrogate is not None:
+            print(f"Surrogate trained: {self.surrogate.is_trained}")
+        self.z_pred_surr = (
+            self.surrogate(c_final)
+            if self.surrogate is not None and self.surrogate.model is not None
+            else None
+        )
 
         # Predict mean model output asynchronously (so we can simultaneously command the thruster)
-        final_controls = [(xk, c_final) for xk in reverse_samples]
+        final_controls = [(xk, self.vec_to_dict(c_final)) for xk in reverse_samples]
+
         self.z_pred_model_future = self.executor.submit(self.forward, final_controls)
 
         self.iter += 1

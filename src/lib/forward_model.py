@@ -135,23 +135,31 @@ class ForwardModel:
         """Generate a valid HallThruster.jl config dictionary corresponding to the given state and control"""
         cfg = self._base_config()
 
-        action = "denormalize"
-
         if state is not None:
             if len(state.shape) == 2:
                 state = state[None, ...]
 
             # Get anomalous collision frequency from tensor
-            nu_anom = self.dataset.get_field(state, "nu_an", action=action)
-            B = self.dataset.get_field(state, "B", action=action)
+            nu_anom = self.dataset.get_field(state, "nu_an")
+            B = self.dataset.get_field(state, "B")
             wce = 1.6e-19 * B / 9.1e-31
             c_anom = nu_anom / wce
             c_anom = c_anom.squeeze(0).tolist()
+
+            # min_c_anom = np.min(c_anom)
+            # max_c_anom = np.max(c_anom)
+            # min_nu_anom = np.min(nu_anom)
+            # max_nu_anom = np.max(nu_anom)
+            # min_B = np.min(B)
+            # max_B = np.max(B)
+            # print(f"{min_c_anom=:.3g}, {max_c_anom=:.3g}")
+            # print(f"{min_nu_anom=:.3g}, {max_nu_anom=:.3g}")
+            # print(f"{min_B=:.3g}, {max_B=:.3g}")
             setkey_deep(cfg, "config.anom_model.cs", c_anom)
 
             # Extract 6 scalar params from tensor
             for oldkey, newkey in self.keymap.items():
-                val = self.dataset.get_field(state, oldkey, action=action)
+                val = self.dataset.get_field(state, oldkey)
                 setkey_deep(cfg, newkey, val.mean().item())
 
         # Extract controls
@@ -234,9 +242,10 @@ class ForwardModel:
                 rms = fourier[1] * mean_current
                 fourier[0], fourier[1] = mean_current, rms
 
-                thrust = self.dataset.get_field(state, "thrust_N")
-                mdot = self.dataset.get_field(state, "anode_mass_flow_rate_kg_s")
-                Vd = self.dataset.get_field(state, "discharge_voltage_v")
+                state = state[None, ...]
+                thrust = self.dataset.get_field(state, "thrust_N").mean()
+                mdot = self.dataset.get_field(state, "anode_mass_flow_rate_kg_s").mean()
+                Vd = self.dataset.get_field(state, "discharge_voltage_v").mean()
 
                 Pd = mean_current * Vd
                 Pd_kW = Pd / 1000
@@ -252,6 +261,9 @@ class ForwardModel:
                     "thrust_to_power_mN_kW": thrust_mN / Pd_kW,
                     "anode_eff": anode_eff,
                 }
+
+                for d in data:
+                    data[d] = data[d].item()
 
                 output_dict[file] = (state, data)
 

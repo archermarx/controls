@@ -78,11 +78,12 @@ def check_for_change(file: Path | str, counter, last_modified):
     if not file.exists():
         return no_change_payload
 
-    modified_time = file.stat().st_mtime
+    modified_time = Path(file).stat().st_mtime
     if modified_time <= last_modified:
         return no_change_payload
 
     try:
+        time.sleep(0.25)
         contents = read_control_file(file)
     except (PermissionError, FileNotFoundError, ValidationError):
         return no_change_payload
@@ -313,7 +314,7 @@ class ThrusterController:
         with open(file, "wb") as fd:
             pickle.dump(file_contents.model_dump(), fd)
 
-        self.control_last_modified = file.stat().st_mtime
+        self.control_last_modified = Path(file).stat().st_mtime
 
         if self.verbose:
             print(f"Send command of type {type} (counter={self.control_counter})")
@@ -678,4 +679,3 @@ class ThrusterController:
             out["oscope"] = self.take_oscope(client)
 
         return out
-
