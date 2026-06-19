@@ -25,7 +25,7 @@ if __name__ == "__main__":
         verbose=args.verbose,
     )
 
-    with LabViewClient(dummy=args.dummy) as labview_client:
+    with LabViewClient(dummy=args.dummy, timeout=60) as labview_client:
         if args.dummy:
             print("Using dummy labview client")
 
