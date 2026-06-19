@@ -12,6 +12,7 @@ from lib.surrogate import Surrogate
 
 from analyze_surrogate import plot_surrogate
 
+from datetime import datetime
 
 def split_and_strip(text, dlm=","):
     return [x.strip() for x in text.split(dlm) if x.strip()]
@@ -43,7 +44,7 @@ parser.add_argument("--output", "-o", type=Path, default=Path("."))
 parser.add_argument("--prefix", "-p", type=str, default="surrogate")
 parser.add_argument("--reset-at-end", action="store_true")
 parser.add_argument("--interactive", action="store_true")
-parser.add_argument("--objective", type=str, default="rms")
+parser.add_argument("--metric", type=str, default="rms")
 parser.add_argument("--restart", type=str)
 parser.add_argument("--remote-dir", type=Path)
 parser.add_argument("--max-no-improvement", type=int, default=10)
@@ -175,12 +176,15 @@ def main(args):
 
             controller.control_to(setpoint, client)
 
+
             data = controller.take_data(
                 client,
-                num_thrust_points=30,
+                num_thrust_points=20,
                 delay=args.dwell_time,
                 sources=args.data,
             )
+
+            data_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             perf = controls.calc_performance_metrics(data, setpoint)
 
             z_actual = metric_fn(perf)
@@ -204,13 +208,13 @@ def main(args):
                 f"Mean: {mean_current:.3f} A, RMS Amplitude: {rms_raw:.3f} A ({rms_pct * 100:.2f}%)"
             )
 
-            if args.objective == "efficiency" or args.objective == "thrust_to_power":
+            if args.metric == "efficiency" or args.metric== "thrust_to_power" or "thrust" in data:
                 thrust = data["thrust"]["thrust_mN"]
                 efficiency = perf["anode_eff"]
                 print(
                     f"Thrust: {thrust:.3f} mN, efficiency: {efficiency:.3f}, shunt: {data['thrust']['shunt']}"
                 )
-                if args.objective == "thrust_to_power":
+                if args.metric == "thrust_to_power":
                     thrust = perf["thrust"]
                     efficiency = perf["anode_eff"]
                     isp = perf["isp"]
@@ -245,13 +249,14 @@ def main(args):
                 elif dim == 2:
                     metadata = {
                         "variable_name": control_vars,
-                        "metric_name": args.objective,
+                        "metric_name": args.metric,
                     }
                     plot_dir = Path(output_dir) / "plots"
                     os.makedirs(plot_dir, exist_ok=True)
                     plot_surrogate(surrogate, metadata, step_num, plot_dir)
 
             sample = {
+                "time": data_time,
                 "step": step_num,
                 "z_actual": z_actual,
                 "z_pred": z_pred,

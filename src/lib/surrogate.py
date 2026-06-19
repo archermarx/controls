@@ -93,7 +93,9 @@ class Surrogate:
 
     def sample_in_bounds(self, n):
         bounds = [(lb, ub) for lb, ub in zip(self.lb, self.ub)]
-        return LHS(xlimits=np.array(bounds))(n)
+        pts = np.array([np.random.uniform(_lb, _ub, n) for (_lb, _ub) in bounds])
+        assert pts.shape == (self.dim, n)
+        return pts.T
 
     def update(self, x, y) -> None:
         X = np.atleast_2d(x)
